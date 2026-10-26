@@ -47,4 +47,4 @@ All members collaborate on integration, testing, code reviews, and documentation
 
 ## Project Status
 
-Currently under development. Features will be implemented incrementally, tested, and integrated through Git branches and pull requests.
+Currently under development. Features will be implemented incrementally, tested, and integrated through Git branches and pull requests .
