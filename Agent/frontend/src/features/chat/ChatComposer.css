@@ -1,0 +1,139 @@
+.composer-wrap {
+  width: min(100%, 710px);
+  margin: 0 auto;
+  padding: 0 18px;
+}
+
+.composer {
+  padding: 13px 14px 10px 16px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 11px;
+  background: var(--color-surface);
+  box-shadow: 0 4px 14px rgb(28 48 32 / 4%);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.composer:focus-within {
+  border-color: #b5cdb8;
+  box-shadow: 0 0 0 3px rgb(82 133 91 / 7%);
+}
+
+.composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 37px;
+  max-height: 140px;
+  resize: vertical;
+  padding: 2px 0 7px;
+  border: 0;
+  outline: 0;
+  color: var(--color-text-secondary);
+  background: transparent;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.composer textarea::placeholder {
+  color: var(--color-text-muted);
+}
+
+.composer textarea:disabled {
+  opacity: 1;
+  color: var(--color-text-secondary);
+  cursor: not-allowed;
+}
+
+.composer textarea:focus-visible {
+  outline: 0;
+}
+
+.composer__bottom,
+.composer__actions {
+  display: flex;
+  align-items: center;
+}
+
+.composer__bottom {
+  min-height: 31px;
+  justify-content: space-between;
+}
+
+.composer__hint,
+.composer__shortcut {
+  color: var(--color-text-muted);
+  font-size: 9px;
+}
+
+.composer__actions {
+  gap: 13px;
+}
+
+.composer__send {
+  display: grid;
+  width: 31px;
+  height: 31px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: white;
+  background: var(--color-green);
+  cursor: pointer;
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.composer__send:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: var(--color-green-dark);
+}
+
+.composer__send:disabled {
+  color: #a3b3a5;
+  background: var(--color-green-surface);
+  cursor: not-allowed;
+}
+
+.composer__spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgb(255 255 255 / 45%);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 750ms linear infinite;
+}
+
+.composer-wrap__disclaimer {
+  margin: 9px 0 0;
+  color: var(--color-text-muted);
+  text-align: center;
+  font-size: 9px;
+}
+
+.composer-error {
+  margin: 0 0 9px;
+  color: #a33c32;
+  font-size: 11px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 600px) {
+  .composer-wrap {
+    padding: 0 12px;
+  }
+
+  .composer {
+    padding: 11px 11px 9px 13px;
+  }
+
+  .composer__hint {
+    display: none;
+  }
+
+  .composer__shortcut {
+    font-size: 8px;
+  }
+}

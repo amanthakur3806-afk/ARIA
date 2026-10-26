@@ -1,0 +1,77 @@
+.app-shell {
+  min-height: 100dvh;
+}
+
+.app-shell__main {
+  min-height: 100dvh;
+  margin-left: 256px;
+}
+
+.app-shell__content {
+  min-height: calc(100dvh - 65px);
+}
+
+.app-shell__notice {
+  position: fixed;
+  z-index: 15;
+  top: 76px;
+  right: 24px;
+  display: flex;
+  max-width: min(430px, calc(100vw - 32px));
+  align-items: center;
+  gap: 14px;
+  padding: 11px 12px 11px 15px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 9px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-shadow: 0 8px 28px rgb(0 0 0 / 10%);
+  font-size: 12px;
+}
+
+.app-shell__notice button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  background: transparent;
+  cursor: pointer;
+  font-size: 19px;
+}
+
+.app-shell__notice button:hover {
+  background: var(--color-green-surface);
+}
+
+.sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .app-shell__main {
+    margin-left: 0;
+  }
+
+  .app-shell__content {
+    min-height: calc(100dvh - 59px);
+  }
+
+  .app-shell__notice {
+    top: 68px;
+    right: 12px;
+    left: 12px;
+  }
+
+  .sidebar-backdrop {
+    position: fixed;
+    z-index: 20;
+    inset: 0;
+    display: block;
+    border: 0;
+    background: rgb(10 16 11 / 52%);
+  }
+}

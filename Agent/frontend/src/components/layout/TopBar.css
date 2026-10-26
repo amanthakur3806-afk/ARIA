@@ -1,0 +1,111 @@
+.topbar {
+  position: sticky;
+  z-index: 5;
+  top: 0;
+  display: flex;
+  height: 65px;
+  flex: 0 0 65px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 38px;
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-surface) 90%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.topbar__breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+
+.topbar__breadcrumbs strong {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.preview-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  color: var(--color-text-muted);
+  background: var(--color-surface-raised);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.preview-status__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+}
+
+.topbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  min-height: 33px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.theme-toggle:hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-green-surface);
+}
+
+.topbar__menu {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    height: 59px;
+    flex-basis: 59px;
+    padding: 0 16px 0 12px;
+  }
+
+  .topbar__menu {
+    display: grid;
+    margin-right: 4px;
+  }
+
+  .topbar__breadcrumbs {
+    margin-right: auto;
+    margin-left: 0;
+  }
+
+  .topbar__actions {
+    gap: 6px;
+  }
+
+  .theme-toggle {
+    width: 34px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .theme-toggle span,
+  .preview-status {
+    display: none;
+  }
+}

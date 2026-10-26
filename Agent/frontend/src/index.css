@@ -1,0 +1,84 @@
+:root {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  color: #272b29;
+  background: #f8f9f6;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+  font-weight: 400;
+  --color-ink: #272b29;
+  --color-muted: #888e88;
+  --color-green: #337a5a;
+  --color-green-dark: #286448;
+  --color-green-light: #edf5ef;
+  --color-border: #e9ece7;
+  --color-app-bg: #f8f9f6;
+  --color-surface: #fff;
+  --color-surface-raised: #fbfcfa;
+  --color-text: #272b29;
+  --color-text-secondary: #606760;
+  --color-text-muted: #888e88;
+  --color-border-strong: #dfe6df;
+  --color-green-surface: #edf4ee;
+  --color-green-soft: #eff5ef;
+  --font-heading: 'Segoe UI', Arial, sans-serif;
+  color: var(--color-text);
+  background: var(--color-app-bg);
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --color-ink: #e6ebe6;
+  --color-muted: #a5afa6;
+  --color-green: #78b48d;
+  --color-green-dark: #91c6a2;
+  --color-green-light: #26392d;
+  --color-border: #303a32;
+  --color-app-bg: #171c18;
+  --color-surface: #202722;
+  --color-surface-raised: #252d27;
+  --color-text: #e6ebe6;
+  --color-text-secondary: #bbc4bc;
+  --color-text-muted: #9ba69c;
+  --color-border-strong: #3a463c;
+  --color-green-surface: #293a2e;
+  --color-green-soft: #29372c;
+  color: var(--color-text);
+  background: var(--color-app-bg);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 360px;
+  min-height: 100vh;
+  margin: 0;
+  color: var(--color-text);
+  background: var(--color-app-bg);
+  transition: color 180ms ease, background-color 180ms ease;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+button:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #a9d2b8;
+  outline-offset: 3px;
+}
+
+::selection {
+  color: #1d4c35;
+  background: #dceee1;
+}
