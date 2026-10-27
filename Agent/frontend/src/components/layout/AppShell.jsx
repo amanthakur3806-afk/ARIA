@@ -11,7 +11,8 @@ export function AppShell({ children }) {
 
   function handleNewChat() {
     setIsNavigationOpen(false)
-    setNotice('Chat is a UI mockup. Connect the chat API before enabling conversations.')
+    setNotice('')
+    window.location.reload()
   }
 
   return (
