@@ -1,4 +1,4 @@
-# ARYA frontend
+# ARIA frontend
 
 This React + Vite app is a **UI mockup**. The theme switch persists light/dark preference, the mobile menu opens and closes, and “New study chat” displays a notice explaining that chat is not connected. Chat sending, prompt suggestions, and unimplemented sections are intentionally disabled. No chat state, API service, or backend connection is included yet.
 

@@ -6,7 +6,7 @@ export function ChatComposer() {
     <div className="composer-wrap">
       <div className="composer">
         <textarea
-          aria-label="Message ARYA"
+          aria-label="Message ARIA"
           maxLength={4000}
           disabled
           placeholder="Ask anything about what you're learning..."
@@ -27,7 +27,7 @@ export function ChatComposer() {
           </div>
         </div>
       </div>
-      <p className="composer-wrap__disclaimer">ARYA can make mistakes. Check important information.</p>
+      <p className="composer-wrap__disclaimer">ARIA can make mistakes. Check important information.</p>
     </div>
   )
 }
