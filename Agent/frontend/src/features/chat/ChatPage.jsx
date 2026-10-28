@@ -212,7 +212,7 @@ function MessageItem({ message }) {
       <div className="assistant-avatar" aria-hidden="true">A</div>
       <div className="message__content-wrap">
         <div className="message__header">
-          <span className="message__author">ARIA Study Assistant</span>
+          <span className="message__author">ARIA</span>
           <span className="message__time">{message.timestamp}</span>
           {message.latency_profile && (
             <span className="message__latency-pill" title="Execution latency">
