@@ -41,7 +41,6 @@ export function TopBar({ onMenuClick, onThemeToggle, onOpenIngest, theme }) {
           <span>{theme === 'light' ? 'Dark mode' : 'Light mode'}</span>
         </button>
         <div className="preview-status">
-          <span aria-hidden="true" className="preview-status__dot" />
           RAG Active
         </div>
       </div>

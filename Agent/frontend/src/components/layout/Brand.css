@@ -15,6 +15,10 @@
   border-radius: 13px;
   color: var(--color-green-dark);
   background: var(--color-green-surface);
+  font-family: var(--font-heading);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -1px;
 }
 
 .brand__name {

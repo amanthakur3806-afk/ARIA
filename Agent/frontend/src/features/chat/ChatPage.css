@@ -225,6 +225,24 @@
   color: var(--color-text);
 }
 
+.markdown-body--streaming::after {
+  display: inline-block;
+  width: 7px;
+  height: 15px;
+  margin-left: 3px;
+  border-radius: 2px;
+  background: var(--color-green);
+  content: '';
+  vertical-align: text-bottom;
+  animation: stream-caret 850ms steps(2, start) infinite;
+}
+
+@keyframes stream-caret {
+  to {
+    visibility: hidden;
+  }
+}
+
 .markdown-body p {
   margin: 0 0 10px;
 }

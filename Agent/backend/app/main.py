@@ -7,14 +7,15 @@ FastMCP Study Tools, and the Persistent User-Scoped RAG Store.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from queue import Queue
+from threading import Thread
+from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,6 +48,7 @@ from app.agent.guardrails import (
     decision_logger,
 )
 from app.db.rag_store import rag_store
+from app.memory.persist import persist_turn
 
 # Initialize FastAPI App
 app = FastAPI(
@@ -109,7 +111,11 @@ def health_check():
 
 @app.post("/api/v1/chat/threads/{thread_id}/messages")
 @app.post("/api/chat")
-def handle_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = None):
+def handle_chat_message(
+    payload: ChatMessageRequest,
+    thread_id: Optional[str] = None,
+    on_token: Optional[Callable[[str], None]] = None,
+):
     """
     Primary chat endpoint with 4-layer guardrails:
     1. Input Guard: control-character stripping, length capping, hostile injection / credential leak blocking.
@@ -121,24 +127,40 @@ def handle_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = 
         return handle_chat_stream(payload=payload, thread_id=thread_id)
 
     resolved_thread_id = thread_id or payload.thread_id or "thread-1"
-    # Strict Clerk user ID rule: authenticated user_id is the sole authority
+    _t0 = time.perf_counter()
     user_id = payload.user_id or "student-1"
-    raw_message = payload.message
+    message_text = payload.message.strip()
 
-    # 1. Layer 1: Input Guard
-    val_res = InputGuard.validate(raw_message, authenticated_user_id=user_id)
-    if not val_res.is_valid:
-        if val_res.status == "validation_error":
-            raise HTTPException(status_code=400, detail=val_res.error_message)
-        else:
-            decision_logger.log(
-                user_id=user_id,
-                path=val_res.path,
-                chunk_count=0,
-                top_score=None,
-                status=val_res.status,
-                decision_reason=val_res.refusal_reason or "security_refusal",
-            )
+    if not message_text:
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
+    try:
+        user_total = rag_store.total_chunks(user_id=user_id)
+        session_total = rag_store.total_chunks(user_id=user_id, session_id=resolved_thread_id)
+
+        # When no data is ingested: reply with NO answers, just a greeting and prompt to upload data
+        if user_total == 0 or session_total == 0:
+            user_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
+            assistant_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
+            if user_total == 0:
+                default_reply = (
+                    f"Hello! 👋 I'm ARIA, your AI Study Assistant.\n\n"
+                    f"Currently, there is no knowledge base or study data uploaded for student **{user_id}**.\n\n"
+                    f"Please upload a knowledge base or data file (such as your lecture notes, textbook chapters, or revision materials) "
+                    f"using the **📥 Ingest Notes / Knowledge Base** button to begin!"
+                )
+            else:
+                default_reply = (
+                    f"Hello! 👋 I'm ARIA, your AI Study Assistant.\n\n"
+                    f"No study materials have been uploaded for session **{resolved_thread_id}** yet.\n\n"
+                    f"Please upload a knowledge base or data file for this session using the **📥 Ingest Notes / Knowledge Base** button, or switch to an active session with materials."
+                )
+
+            persist_turn(user_id, message_text, default_reply, intent="no_data_prompt", language="en")
+            if on_token:
+                for offset in range(0, len(default_reply), 32):
+                    on_token(default_reply[offset:offset + 32])
+
             return {
                 "thread_id": resolved_thread_id,
                 "user_id": user_id,
@@ -171,36 +193,13 @@ def handle_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = 
             allow_curriculum_fallback=False,
         )
 
-        # 2. Layer 2: Retrieval Gate evaluated BEFORE model call
-        intent = agent.detect_intent(message_text)
-        gate_res = RetrievalGate.evaluate(matched_chunks, scores, min_score=RAG_MIN_SCORE)
-        if gate_res.path == DecisionPath.NO_CONTEXT and intent != StudyIntent.CONVERSATIONAL_GUIDE:
-            decision_logger.log(
-                user_id=user_id,
-                path=DecisionPath.NO_CONTEXT,
-                chunk_count=0,
-                top_score=gate_res.top_score,
-                status="success",
-                decision_reason=gate_res.decision_reason,
-            )
-            return {
-                "thread_id": resolved_thread_id,
-                "user_id": user_id,
-                "user_message": {"id": f"msg_{uuid.uuid4().hex[:8]}", "role": "user", "content": message_text},
-                "assistant_message": {
-                    "id": f"msg_{uuid.uuid4().hex[:8]}",
-                    "role": "assistant",
-                    "content": NO_CONTEXT_MESSAGE,
-                    "intent": "no_context",
-                    "language": "en",
-                    "sources": [],
-                    "actions": [],
-                    "structured_data": None,
-                    "latency_profile": None,
-                },
-            }
+        streamed_content: List[str] = []
 
-        # 3. Grounded Path
+        def emit_token(token: str):
+            if on_token:
+                on_token(token)
+                streamed_content.append(token)
+
         response = agent.handle_message(
             message=message_text,
             user_id=user_id,
@@ -208,10 +207,27 @@ def handle_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = 
             context_chunks=gate_res.filtered_chunks,
             context_scores=gate_res.filtered_scores,
             user_preferences=payload.preferences,
+            on_token=emit_token if on_token else None,
         )
+        if on_token:
+            emitted_text = "".join(streamed_content)
+            if response.content.startswith(emitted_text):
+                remaining_content = response.content[len(emitted_text):]
+            else:
+                remaining_content = response.content
+            for offset in range(0, len(remaining_content), 32):
+                on_token(remaining_content[offset:offset + 32])
 
         user_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
         assistant_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
+
+        persist_turn(
+            user_id, message_text, response.content,
+            intent=response.intent, language=response.language,
+            sources=response.sources,
+            actions=[a.to_dict() for a in response.actions],
+            latency_ms=int((time.perf_counter() - _t0) * 1000),
+        )
 
         return {
             "thread_id": resolved_thread_id,
@@ -238,93 +254,48 @@ def handle_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = 
 
 
 @app.post("/api/v1/chat/threads/{thread_id}/messages/stream")
-@app.post("/api/chat/stream")
-def handle_chat_stream(payload: ChatMessageRequest, thread_id: Optional[str] = None):
-    """
-    Server-Sent Events (SSE) streaming chat endpoint with guardrails.
-    """
-    resolved_thread_id = thread_id or payload.thread_id or "thread-1"
-    user_id = payload.user_id or "student-1"
-    raw_message = payload.message
+def stream_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = None):
+    """Streams generated chat text and sends response metadata when the turn completes."""
+    if not payload.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
-    val_res = InputGuard.validate(raw_message, authenticated_user_id=user_id)
-    if not val_res.is_valid:
-        if val_res.status == "validation_error":
-            raise HTTPException(status_code=400, detail=val_res.error_message)
-        else:
-            decision_logger.log(
-                user_id=user_id,
-                path=val_res.path,
-                chunk_count=0,
-                top_score=None,
-                status=val_res.status,
-                decision_reason=val_res.refusal_reason or "security_refusal",
-            )
-            def sse_refusal():
-                yield f"data: {json.dumps({'type': 'metadata', 'thread_id': resolved_thread_id, 'user_id': user_id, 'intent': 'security_refusal', 'language': 'en', 'sources': []})}\n\n"
-                yield f"data: {json.dumps({'type': 'token', 'content': val_res.error_message or SECURITY_REFUSAL_MESSAGE})}\n\n"
-                yield "data: [DONE]\n\n"
-            return StreamingResponse(sse_refusal(), media_type="text/event-stream")
+    events: Queue = Queue()
 
-    message_text = val_res.sanitized_query
-
-    try:
-        user_total = rag_store.total_chunks(user_id=user_id)
-        session_total = rag_store.total_chunks(user_id=user_id, session_id=resolved_thread_id)
-
-        matched_chunks, scores, ret_lat = rag_store.search(
-            user_id=user_id,
-            query=message_text,
-            top_k=DEFAULT_TOP_K,
-            session_id=resolved_thread_id,
-            allow_curriculum_fallback=False,
-        )
-
-        intent = agent.detect_intent(message_text)
-        gate_res = RetrievalGate.evaluate(matched_chunks, scores, min_score=RAG_MIN_SCORE)
-        if gate_res.path == DecisionPath.NO_CONTEXT and intent != StudyIntent.CONVERSATIONAL_GUIDE:
-            decision_logger.log(
-                user_id=user_id,
-                path=DecisionPath.NO_CONTEXT,
-                chunk_count=0,
-                top_score=gate_res.top_score,
-                status="success",
-                decision_reason=gate_res.decision_reason,
-            )
-            def sse_no_context():
-                yield f"data: {json.dumps({'type': 'metadata', 'thread_id': resolved_thread_id, 'user_id': user_id, 'intent': 'no_context', 'language': 'en', 'sources': []})}\n\n"
-                yield f"data: {json.dumps({'type': 'token', 'content': NO_CONTEXT_MESSAGE})}\n\n"
-                yield "data: [DONE]\n\n"
-            return StreamingResponse(sse_no_context(), media_type="text/event-stream")
-
-        def sse_event_stream():
+    def generate_events():
+        def process_message():
             try:
-                for event in agent.handle_message_stream(
-                    message=message_text,
-                    user_id=user_id,
-                    thread_id=resolved_thread_id,
-                    context_chunks=gate_res.filtered_chunks,
-                    context_scores=gate_res.filtered_scores,
-                    user_preferences=payload.preferences,
-                ):
-                    yield f"data: {json.dumps(event)}\n\n"
-                yield "data: [DONE]\n\n"
-            except Exception as err:
-                err_payload = {"type": "error", "message": f"Agent execution error: {str(err)}"}
-                yield f"data: {json.dumps(err_payload)}\n\n"
-                yield "data: [DONE]\n\n"
+                result = handle_chat_message(
+                    payload,
+                    thread_id,
+                    on_token=lambda content: events.put(("token", {"content": content})),
+                )
+                assistant_message = result["assistant_message"]
+                metadata = {key: value for key, value in assistant_message.items() if key != "content"}
+                events.put(("complete", {
+                    "thread_id": result["thread_id"],
+                    "user_id": result["user_id"],
+                    "assistant_message": metadata,
+                }))
+            except HTTPException as error:
+                events.put(("error", {"detail": error.detail}))
+            except Exception as error:
+                events.put(("error", {"detail": str(error)}))
+            finally:
+                events.put(("end", None))
 
-        return StreamingResponse(
-            sse_event_stream(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent execution error: {str(e)}")
+        Thread(target=process_message, daemon=True).start()
+        while True:
+            event_name, event_data = events.get()
+            if event_name == "end":
+                break
+            encoded_data = json.dumps(event_data, ensure_ascii=False)
+            yield f"event: {event_name}\ndata: {encoded_data}\n\n"
+
+    return StreamingResponse(
+        generate_events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/v1/documents/ingest")

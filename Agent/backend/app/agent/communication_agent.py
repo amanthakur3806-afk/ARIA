@@ -482,13 +482,15 @@ class LLMCommunicator:
         context_chunks: Optional[List[str]] = None,
         language: str = "en",
         temperature: float = 0.3,
-        system_instruction: Optional[str] = None
+        system_instruction: Optional[str] = None,
+        on_token: Optional[Callable[[str], None]] = None,
     ) -> Tuple[str, float]:
         """
         Sends prompt and grounded context to LLM, measuring roundtrip latency in milliseconds.
         Returns: (response_text, latency_ms)
         """
         t0 = time.perf_counter()
+        has_streamed_output = False
 
         # 1. Groq Provider (Primary)
         if self.provider == "groq" and self.groq_key and not self.groq_key.startswith("gsk_your_"):
@@ -526,17 +528,34 @@ class LLMCommunicator:
                                 {"role": "user", "content": f"Context Notes:\n{ctx_block}\n\nQuestion/Task:\n{prompt}"}
                             ],
                             temperature=temperature,
-                            max_tokens=safe_max_tokens
+                            max_tokens=safe_max_tokens,
+                            stream=on_token is not None,
                         )
-                        answer = resp.choices[0].message.content or ""
+                        if on_token:
+                            answer_parts = []
+                            for chunk in resp:
+                                if not chunk.choices:
+                                    continue
+                                token = chunk.choices[0].delta.content or ""
+                                if token:
+                                    answer_parts.append(token)
+                                    on_token(token)
+                                    has_streamed_output = True
+                            answer = "".join(answer_parts)
+                        else:
+                            answer = resp.choices[0].message.content or ""
                         latency_ms = (time.perf_counter() - t0) * 1000.0
                         return answer, latency_ms
                     except Exception as inner_e:
                         print(f"[ARIA Groq Notice] Model '{model_candidate}' failed: {inner_e}", file=sys.stderr)
+                        if has_streamed_output:
+                            raise
                         continue
             except Exception as e:
                 # Log warning and fall back to grounded engine on connection/auth issue
                 print(f"[ARIA Groq Warning] LLM call failed: {e}", file=sys.stderr)
+                if has_streamed_output:
+                    raise
                 pass
 
         # 2. OpenAI Provider (Alternative)
@@ -556,13 +575,27 @@ class LLMCommunicator:
                         {"role": "user", "content": f"Context Notes:\n{ctx_block}\n\nQuestion/Task:\n{prompt}"}
                     ],
                     temperature=temperature,
-                    max_tokens=800
+                    max_tokens=800,
+                    stream=on_token is not None,
                 )
-                answer = resp.choices[0].message.content or ""
+                if on_token:
+                    answer_parts = []
+                    for chunk in resp:
+                        if not chunk.choices:
+                            continue
+                        token = chunk.choices[0].delta.content or ""
+                        if token:
+                            answer_parts.append(token)
+                            on_token(token)
+                            has_streamed_output = True
+                    answer = "".join(answer_parts)
+                else:
+                    answer = resp.choices[0].message.content or ""
                 latency_ms = (time.perf_counter() - t0) * 1000.0
                 return answer, latency_ms
             except Exception:
-                pass
+                if has_streamed_output:
+                    raise
 
         # 3. Intelligent Grounded Synthesis Engine (Zero-Dependency Standalone Fallback)
         ctx_snippet = ""
@@ -588,6 +621,9 @@ class LLMCommunicator:
             grounded = f"Based on your course notes, '{prompt.strip()}' addresses key structural constraints by decoupling resources and establishing verified execution boundaries.{ctx_snippet}"
 
         answer = f"{greeting}\n\n{grounded}"
+        if on_token:
+            for offset in range(0, len(answer), 32):
+                on_token(answer[offset:offset + 32])
         latency_ms = (time.perf_counter() - t0) * 1000.0
         return answer, latency_ms
 
@@ -1111,7 +1147,7 @@ class CommunicationAgent:
         thread_id: str = "thread-1",
         context_chunks: Optional[List[Union[str, Dict[str, Any]]]] = None,
         user_preferences: Optional[Dict[str, Any]] = None,
-        context_scores: Optional[List[float]] = None,
+        on_token: Optional[Callable[[str], None]] = None,
     ) -> AgentResponse:
         """
         Executes an end-to-end student turn through the 4 defense-in-depth guardrail layers:
@@ -1230,38 +1266,12 @@ class CommunicationAgent:
             valid_logic, issues = self.logic.validate_study_plan_logic(study_plan)
 
             # Grounded synthesis via LLM communicator
-            raw_llm_text, llm_ms = self.llm.generate_response(
-                sanitized_message,
+            llm_text, llm_ms = self.llm.generate_response(
+                message,
                 raw_text_chunks,
                 language=language,
-                system_instruction=GUARDRAIL_SYSTEM_PROMPT
+                on_token=on_token,
             )
-            guarded_res = OutputGuard.guard(raw_llm_text, included_sources, path=gate_res.path)
-            llm_text = guarded_res.content
-            sources = guarded_res.sources
-
-            if not guarded_res.is_grounded:
-                total_turn_ms = (time.perf_counter() - t_start) * 1000.0
-                profile = LatencyProfile(round(retrieval_ms, 2), 0.0, round(llm_ms, 2), round(total_turn_ms, 2), True)
-                decision_logger.log(
-                    user_id=user_id,
-                    path=DecisionPath.NO_CONTEXT,
-                    chunk_count=0,
-                    top_score=gate_res.top_score,
-                    status="success",
-                    decision_reason="output_guard_ungrounded"
-                )
-                return AgentResponse(
-                    thread_id=thread_id,
-                    user_id=user_id,
-                    content=NO_CONTEXT_MESSAGE,
-                    intent=intent.value,
-                    language=language,
-                    actions=[],
-                    sources=[],
-                    structured_data=None,
-                    latency_profile=profile
-                )
 
             content_lines = [
                 f"{llm_text}\n",

@@ -6,6 +6,57 @@ import { FlowchartWidget, MermaidDiagram } from './FlowchartWidget'
 import { RagKnowledgeModal } from '../rag/RagKnowledgeModal'
 import './ChatPage.css'
 
+async function readChatStream(response, onToken, onComplete) {
+  if (!response.body) {
+    throw new Error('The server did not provide a streaming response.')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let completed = false
+
+  function dispatchEvent(rawEvent) {
+    let eventName = ''
+    const dataLines = []
+    for (const line of rawEvent.split('\n')) {
+      if (line.startsWith('event:')) eventName = line.slice(6).trim()
+      if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
+    }
+
+    if (!dataLines.length) return
+    const eventData = JSON.parse(dataLines.join('\n'))
+    if (eventName === 'token') onToken(eventData.content)
+    if (eventName === 'error') throw new Error(eventData.detail || 'The response stream failed.')
+    if (eventName === 'complete') {
+      completed = true
+      onComplete(eventData)
+    }
+  }
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      buffer += decoder.decode(value, { stream: !done })
+      buffer = buffer.replace(/\r\n/g, '\n')
+
+      let eventBoundary = buffer.indexOf('\n\n')
+      while (eventBoundary !== -1) {
+        dispatchEvent(buffer.slice(0, eventBoundary))
+        buffer = buffer.slice(eventBoundary + 2)
+        eventBoundary = buffer.indexOf('\n\n')
+      }
+
+      if (done) break
+    }
+
+    if (buffer.trim()) dispatchEvent(buffer)
+    if (!completed) throw new Error('The response stream ended before completion.')
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSetIsOpen }) {
   const [messages, setMessages] = useState([])
   const [isLoading, setIsLoading] = useState(false)
@@ -14,13 +65,25 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
   const [sessionId, setSessionId] = useState('thread-1')
   const [localIsOpen, setLocalIsOpen] = useState(false)
   const [chunkCount, setChunkCount] = useState(0)
+  const [fileToIngest, setFileToIngest] = useState(null)
   const messagesEndRef = useRef(null)
 
   const isModalOpen = propIsOpen !== undefined ? propIsOpen : localIsOpen
   const setModalOpen = propSetIsOpen || setLocalIsOpen
 
+  function handleOpenIngest(file) {
+    if (file) setFileToIngest(file)
+    setModalOpen(true)
+  }
+
+  function handleCloseIngest() {
+    setFileToIngest(null)
+    setModalOpen(false)
+  }
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const isStreaming = messages.some((message) => message.isStreaming)
+    messagesEndRef.current?.scrollIntoView({ behavior: isStreaming ? 'auto' : 'smooth' })
   }, [messages, isLoading])
 
   async function updateChunkCount(uid = userId, sid = sessionId) {
@@ -49,30 +112,24 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
       content: text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     }
+    const assistantMessageId = `ast_${Date.now()}`
 
-    const assistantId = `ast_${Date.now() + 1}`
-    const placeholderAssistant = {
-      id: assistantId,
+    setMessages((prev) => [...prev, userMessage, {
+      id: assistantMessageId,
       role: 'assistant',
       content: '',
-      intent: 'explain_and_plan',
-      language: 'en',
-      sources: [],
-      actions: [],
-      structured_data: null,
-      latency_profile: null,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isStreaming: true,
-    }
-
-    // Insert user message and assistant placeholder together upfront (immune to React StrictMode)
-    setMessages((prev) => [...prev, userMessage, placeholderAssistant])
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    }])
     setIsLoading(true)
 
     try {
       const response = await fetch(`/api/v1/chat/threads/${encodeURIComponent(sessionId)}/messages/stream`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        },
         body: JSON.stringify({
           message: text,
           user_id: userId,
@@ -86,186 +143,46 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
         throw new Error(errorData.detail || `Server returned ${response.status}`)
       }
 
-      const contentType = response.headers.get('content-type') || ''
-      const isStream = contentType.includes('text/event-stream') && response.body
-
-      if (isStream) {
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder('utf-8')
-        let buffer = ''
-        let streamClosed = false
-
-        // Smooth typewriter pacing queue
-        const tokenQueue = []
-        let displayedContent = ''
-        let pendingStructured = null
-        let pendingLatency = null
-        let tickerId = null
-
-        // Ticker drains words at human reading pace (25ms interval)
-        const startPacer = () => {
-          if (tickerId) return
-          tickerId = setInterval(() => {
-            if (tokenQueue.length > 0) {
-              // Smooth dynamic pacing: 1 word if queue is small, scales up if queue is large
-              const step = tokenQueue.length > 45 ? 4 : (tokenQueue.length > 15 ? 2 : 1)
-              const nextBatch = tokenQueue.splice(0, step).join('')
-              displayedContent += nextBatch
-
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId ? { ...m, content: displayedContent } : m
-                )
-              )
-            } else if (streamClosed) {
-              // Queue fully drained and server stream is closed
-              clearInterval(tickerId)
-              tickerId = null
-
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantId
-                    ? {
-                        ...m,
-                        content: displayedContent,
-                        structured_data: pendingStructured || m.structured_data,
-                        latency_profile: pendingLatency || m.latency_profile,
-                        isStreaming: false,
-                      }
-                    : m
-                )
-              )
-              setIsLoading(false)
-            }
-          }, 24)
-        }
-
-        startPacer()
-
-        while (!streamClosed) {
-          const { value, done } = await reader.read()
-          if (done) {
-            streamClosed = true
-            break
-          }
-
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-
-          for (const rawLine of lines) {
-            const line = rawLine.trim()
-            if (!line || !line.startsWith('data:')) continue
-
-            const payloadStr = line.replace(/^data:\s*/, '').trim()
-            if (payloadStr === '[DONE]') {
-              streamClosed = true
-              break
-            }
-
-            try {
-              const event = JSON.parse(payloadStr)
-              if (event.type === 'metadata') {
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantId
-                      ? {
-                          ...m,
-                          intent: event.intent || m.intent,
-                          language: event.language || m.language,
-                          sources: event.sources || m.sources,
-                        }
-                      : m
-                  )
-                )
-              } else if (event.type === 'token') {
-                // Break incoming token chunk into individual words and whitespace for natural typewriter rhythm
-                const words = (event.content || '').match(/\S+|\s+/g) || []
-                for (const w of words) {
-                  tokenQueue.push(w)
-                }
-              } else if (event.type === 'structured_data') {
-                pendingStructured = event.structured_data || null
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantId
-                      ? {
-                          ...m,
-                          actions: event.actions || m.actions,
-                        }
-                      : m
-                  )
-                )
-              } else if (event.type === 'complete') {
-                pendingLatency = event.latency_profile || null
-              } else if (event.type === 'error') {
-                throw new Error(event.message || 'Stream processing error')
-              }
-            } catch (err) {
-              if (err.message && err.message.includes('Stream processing error')) {
-                throw err
-              }
-            }
-          }
-        }
-
-        // Flush remaining buffer into token queue if present
-        if (buffer && buffer.trim().startsWith('data:')) {
-          const payloadStr = buffer.trim().replace(/^data:\s*/, '').trim()
-          if (payloadStr !== '[DONE]') {
-            try {
-              const event = JSON.parse(payloadStr)
-              if (event.type === 'token') {
-                const words = (event.content || '').match(/\S+|\s+/g) || []
-                for (const w of words) {
-                  tokenQueue.push(w)
-                }
-              } else if (event.type === 'complete') {
-                pendingLatency = event.latency_profile || null
-              }
-            } catch (e) {}
-          }
-        }
-
-        streamClosed = true
-      } else {
-        const data = await response.json()
-        const assistantData = data.assistant_message || {}
-
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId
+      await readChatStream(
+        response,
+        (content) => {
+          setMessages((prev) => prev.map((message) => (
+            message.id === assistantMessageId
+              ? { ...message, content: message.content + content }
+              : message
+          )))
+        },
+        (data) => {
+          const assistantData = data.assistant_message || {}
+          setMessages((prev) => prev.map((message) => (
+            message.id === assistantMessageId
               ? {
-                  ...m,
-                  content: assistantData.content || 'I processed your request.',
-                  intent: assistantData.intent,
-                  language: assistantData.language,
-                  sources: assistantData.sources || [],
-                  actions: assistantData.actions || [],
-                  structured_data: assistantData.structured_data || null,
-                  latency_profile: assistantData.latency_profile || null,
+                  ...message,
+                  ...assistantData,
+                  id: assistantData.id || assistantMessageId,
+                  role: 'assistant',
+                  content: message.content,
                   isStreaming: false,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 }
-              : m
-          )
-        )
-        setIsLoading(false)
-      }
+              : message
+          )))
+        },
+      )
     } catch (err) {
       console.error('Chat error:', err)
-      setError(`Connection error: ${err.message}. Ensure backend is running.`)
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantId
-            ? {
-                ...m,
-                content: `⚠️ **Unable to connect to ARIA backend.**\n\n*Error details:* ${err.message}\n\nPlease verify that the backend server is running on \`http://127.0.0.1:8000\`.`,
-                isError: true,
-                isStreaming: false,
-              }
-            : m
-        )
-      )
+      setError(`Chat request failed: ${err.message}`)
+      setMessages((prev) => prev.map((message) => (
+        message.id === assistantMessageId
+          ? {
+              ...message,
+              content: `⚠️ **Unable to complete this response.**\n\n*Error details:* ${err.message}`,
+              isError: true,
+              isStreaming: false,
+            }
+          : message
+      )))
+    } finally {
       setIsLoading(false)
     }
   }
@@ -302,7 +219,7 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
         <div className="chat-page__welcome">
           <WelcomePanel
             onSelectSuggestion={handleSendMessage}
-            onOpenIngest={() => setModalOpen(true)}
+            onOpenIngest={() => handleOpenIngest()}
           />
         </div>
       ) : (
@@ -312,7 +229,7 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
               <MessageItem key={msg.id} message={msg} />
             ))}
 
-            {isLoading && !messages.some((m) => m.isStreaming) && (
+            {isLoading && !messages.some((message) => message.isStreaming && message.content) && (
               <div className="chat-page__loading-wrap">
                 <div className="assistant-avatar">A</div>
                 <div className="chat-thinking">
@@ -334,16 +251,17 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
         <ChatComposer
           isLoading={isLoading}
           onSend={handleSendMessage}
-          onOpenIngest={() => setModalOpen(true)}
+          onOpenIngest={handleOpenIngest}
         />
       </div>
 
       {/* RAG Knowledge Base Modal */}
       <RagKnowledgeModal
         isOpen={isModalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={handleCloseIngest}
         userId={userId}
         sessionId={sessionId}
+        fileToIngest={fileToIngest}
         onUserChange={(newUid) => {
           setUserId(newUid)
           updateChunkCount(newUid, sessionId)
@@ -377,7 +295,7 @@ function MessageItem({ message }) {
       <div className="assistant-avatar" aria-hidden="true">A</div>
       <div className="message__content-wrap">
         <div className="message__header">
-          <span className="message__author">ARIA Study Assistant</span>
+          <span className="message__author">ARIA</span>
           <span className="message__time">{message.timestamp}</span>
           {message.latency_profile && (
             <span className="message__latency-pill" title="Execution latency">
@@ -387,18 +305,7 @@ function MessageItem({ message }) {
         </div>
 
         <div className="message__bubble message__bubble--assistant">
-          {!message.content && message.isStreaming ? (
-            <div className="chat-thinking chat-thinking--inline" title="ARIA is synthesizing...">
-              <span />
-              <span />
-              <span />
-            </div>
-          ) : (
-            <MarkdownRenderer text={message.content} />
-          )}
-          {message.isStreaming && message.content && (
-            <span className="streaming-cursor" title="ARIA is writing...">▍</span>
-          )}
+          <MarkdownRenderer text={message.content} isStreaming={message.isStreaming} />
 
           {/* Interactive Structured Widgets */}
           {message.structured_data?.flashcards && (
@@ -427,8 +334,8 @@ function MessageItem({ message }) {
   )
 }
 
-// Simple safe Markdown Renderer preserving code blocks & Mermaid diagrams
-function MarkdownRenderer({ text }) {
+// Simple safe Markdown Renderer
+function MarkdownRenderer({ text, isStreaming = false }) {
   if (!text) return null
 
   // Tokenize blocks into code/mermaid fences and normal text to prevent breaking multiline diagrams
@@ -454,10 +361,19 @@ function MarkdownRenderer({ text }) {
   }
 
   return (
-    <div className="markdown-body">
-      {blocks.map((block, bIdx) => {
-        if (block.type === 'mermaid') {
-          return <MermaidDiagram key={bIdx} code={block.content} />
+    <div className={`markdown-body${isStreaming ? ' markdown-body--streaming' : ''}`}>
+      {paragraphs.map((para, idx) => {
+        const trimmed = para.trim()
+        if (!trimmed) return null
+
+        if (trimmed.startsWith('### ')) {
+          return <h3 key={idx}>{trimmed.replace('### ', '')}</h3>
+        }
+        // Mermaid diagram code blocks
+        if (trimmed.startsWith('```mermaid') || trimmed.includes('```mermaid')) {
+          const match = trimmed.match(/```mermaid([\s\S]*?)```/)
+          const mermaidCode = match ? match[1].trim() : trimmed.replace(/```mermaid/gi, '').replace(/```/g, '').trim()
+          return <MermaidDiagram key={idx} code={mermaidCode} />
         }
         if (block.type === 'code') {
           return (
