@@ -2,7 +2,7 @@
 ARIA Agent Package (Agent/backend/app/agent)
 
 Exposes the CommunicationAgent, BasicRAGPipeline, ChunkExtractor, BasicRetriever,
-LLMCommunicator, LogicValidator, benchmark test suite, and LangGraph adapters.
+LLMCommunicator, LogicValidator, benchmark test suite, and Guardrail Safety Architecture.
 """
 
 from .communication_agent import (
@@ -22,6 +22,29 @@ from .communication_agent import (
     StudyIntent,
     run_all_tests,
 )
+from .guardrails import (
+    ANSWER_POLICY_MODE,
+    CROSS_USER_REFUSAL_MESSAGE,
+    DecisionLogEntry,
+    DecisionLogger,
+    DecisionPath,
+    FakeLLM,
+    GUARDRAIL_SYSTEM_PROMPT,
+    InputGuard,
+    InputValidationResult,
+    MAX_QUERY_LENGTH,
+    NO_CONTEXT_MESSAGE,
+    OutputGuard,
+    OutputGuardResult,
+    RAG_MIN_SCORE,
+    RetrievalGate,
+    RetrievalGateResult,
+    SECURITY_REFUSAL_MESSAGE,
+    VALIDATION_ERROR_EMPTY,
+    VALIDATION_ERROR_TOO_LONG,
+    build_context,
+    decision_logger,
+)
 
 __all__ = [
     "CommunicationAgent",
@@ -39,4 +62,25 @@ __all__ = [
     "SAMPLE_OS_DOCUMENT",
     "BENCHMARK_DATASETS",
     "run_all_tests",
+    "DecisionPath",
+    "InputGuard",
+    "InputValidationResult",
+    "RetrievalGate",
+    "RetrievalGateResult",
+    "OutputGuard",
+    "OutputGuardResult",
+    "DecisionLogger",
+    "DecisionLogEntry",
+    "decision_logger",
+    "build_context",
+    "FakeLLM",
+    "GUARDRAIL_SYSTEM_PROMPT",
+    "ANSWER_POLICY_MODE",
+    "RAG_MIN_SCORE",
+    "MAX_QUERY_LENGTH",
+    "NO_CONTEXT_MESSAGE",
+    "SECURITY_REFUSAL_MESSAGE",
+    "CROSS_USER_REFUSAL_MESSAGE",
+    "VALIDATION_ERROR_EMPTY",
+    "VALIDATION_ERROR_TOO_LONG",
 ]

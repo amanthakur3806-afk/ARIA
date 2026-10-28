@@ -209,6 +209,13 @@
   background: rgba(99, 102, 241, 0.1);
 }
 
+.file-drop-zone--dragging .file-drop-label {
+  border-color: #a855f7;
+  background: rgba(168, 85, 247, 0.15);
+  transform: scale(1.01);
+  box-shadow: 0 0 16px rgba(168, 85, 247, 0.3);
+}
+
 .file-drop-icon {
   font-size: 1.6rem;
 }

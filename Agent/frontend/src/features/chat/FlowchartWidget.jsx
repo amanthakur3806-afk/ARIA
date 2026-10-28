@@ -4,6 +4,7 @@ import mermaid from 'mermaid'
 // Initialize Mermaid with safe defaults
 mermaid.initialize({
   startOnLoad: false,
+  suppressErrorRendering: true,
   theme: 'neutral',
   securityLevel: 'loose',
   fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
@@ -25,10 +26,11 @@ export function MermaidDiagram({ code }) {
   const [copied, setCopied] = useState(false)
   const [showCode, setShowCode] = useState(false)
 
-  // Clean code from markdown code fences
+  // Clean code from markdown code fences and strip XML/HTML tags
   const cleanCode = (code || '')
     .replace(/^```mermaid\s*/i, '')
     .replace(/```\s*$/, '')
+    .replace(/<[^>]+>/g, '')
     .trim()
 
   useEffect(() => {
@@ -38,12 +40,15 @@ export function MermaidDiagram({ code }) {
     const renderDiagram = async () => {
       const uniqueId = `mermaid_${Math.random().toString(36).substring(2, 10)}`
       try {
+        // Clean any stray error elements inserted by Mermaid into document body
+        document.querySelectorAll('.error-icon, [id^="dmermaid_"]').forEach((el) => el.remove())
         const { svg } = await mermaid.render(uniqueId, cleanCode)
         if (!isCancelled) {
           setSvgHtml(svg)
           setRenderError(null)
         }
       } catch (err) {
+        document.querySelectorAll('.error-icon, [id^="dmermaid_"]').forEach((el) => el.remove())
         if (!isCancelled) {
           console.warn('Mermaid rendering notice:', err)
           setRenderError(err.message || 'Error parsing diagram syntax')
