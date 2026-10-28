@@ -48,7 +48,8 @@
 }
 
 .composer__bottom,
-.composer__actions {
+.composer__actions,
+.composer__left-actions {
   display: flex;
   align-items: center;
 }
@@ -56,6 +57,36 @@
 .composer__bottom {
   min-height: 34px;
   justify-content: space-between;
+}
+
+.composer__left-actions {
+  gap: 12px;
+}
+
+.composer__ingest-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(79, 70, 229, 0.4);
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.15), rgba(124, 58, 237, 0.12));
+  color: #818cf8;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.composer__ingest-btn:hover {
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.3), rgba(124, 58, 237, 0.25));
+  border-color: rgba(79, 70, 229, 0.6);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.composer__ingest-icon {
+  font-size: 13px;
 }
 
 .composer__hint,

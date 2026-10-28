@@ -4,6 +4,73 @@
   flex-direction: column;
 }
 
+/* Scope & RAG bar */
+.chat-scope-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  font-size: 0.8rem;
+  color: var(--color-text-secondary, #94a3b8);
+  flex-wrap: wrap;
+}
+
+.chat-scope-bar__item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.scope-icon {
+  font-size: 0.9rem;
+}
+
+.scope-label {
+  color: var(--color-text-muted, #64748b);
+}
+
+.scope-val {
+  color: var(--color-text-primary, #f1f5f9);
+  font-weight: 600;
+}
+
+.chat-scope-bar__divider {
+  color: var(--color-border, rgba(255, 255, 255, 0.1));
+}
+
+.chat-scope-rag-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: #a5b4fc;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.chat-scope-rag-btn:hover {
+  background: rgba(99, 102, 241, 0.22);
+  border-color: rgba(99, 102, 241, 0.5);
+  transform: translateY(-1px);
+}
+
+.rag-btn-pill {
+  background: #6366f1;
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 .chat-page__welcome {
   display: flex;
   min-height: 0;

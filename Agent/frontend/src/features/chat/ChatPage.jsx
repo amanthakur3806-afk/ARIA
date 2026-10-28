@@ -3,17 +3,41 @@ import { ChatComposer } from './ChatComposer'
 import { WelcomePanel } from './WelcomePanel'
 import { Icon } from '../../components/ui/Icon'
 import { FlowchartWidget, MermaidDiagram } from './FlowchartWidget'
+import { RagKnowledgeModal } from '../rag/RagKnowledgeModal'
 import './ChatPage.css'
 
-export function ChatPage() {
+export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSetIsOpen }) {
   const [messages, setMessages] = useState([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [userId, setUserId] = useState('student-1')
+  const [sessionId, setSessionId] = useState('thread-1')
+  const [localIsOpen, setLocalIsOpen] = useState(false)
+  const [chunkCount, setChunkCount] = useState(0)
   const messagesEndRef = useRef(null)
+
+  const isModalOpen = propIsOpen !== undefined ? propIsOpen : localIsOpen
+  const setModalOpen = propSetIsOpen || setLocalIsOpen
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
+
+  async function updateChunkCount(uid = userId, sid = sessionId) {
+    try {
+      const res = await fetch(`/api/v1/documents/chunks?user_id=${encodeURIComponent(uid)}&session_id=${encodeURIComponent(sid)}`)
+      if (res.ok) {
+        const data = await res.json()
+        setChunkCount(data.total_chunks || 0)
+      }
+    } catch (e) {
+      console.warn('Failed to fetch chunks:', e)
+    }
+  }
+
+  useEffect(() => {
+    updateChunkCount(userId, sessionId)
+  }, [userId, sessionId])
 
   async function handleSendMessage(text) {
     if (!text || isLoading) return
@@ -30,10 +54,14 @@ export function ChatPage() {
     setIsLoading(true)
 
     try {
-      const response = await fetch('/api/v1/chat/threads/thread-1/messages', {
+      const response = await fetch(`/api/v1/chat/threads/${encodeURIComponent(sessionId)}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({
+          message: text,
+          user_id: userId,
+          thread_id: sessionId,
+        }),
       })
 
       if (!response.ok) {
@@ -79,9 +107,38 @@ export function ChatPage() {
 
   return (
     <section aria-label="Study chat" className="chat-page">
+      {/* User & Session & RAG Knowledge Bar */}
+      <div className="chat-scope-bar">
+        <div className="chat-scope-bar__item">
+          <span className="scope-icon">👤</span>
+          <span className="scope-label">Student:</span>
+          <strong className="scope-val">{userId}</strong>
+        </div>
+        <div className="chat-scope-bar__divider">•</div>
+        <div className="chat-scope-bar__item">
+          <span className="scope-icon">📁</span>
+          <span className="scope-label">Session:</span>
+          <strong className="scope-val">{sessionId}</strong>
+        </div>
+        <div className="chat-scope-bar__divider">•</div>
+        <button
+          className="chat-scope-rag-btn"
+          onClick={() => setModalOpen(true)}
+          title="Open RAG Knowledge Base and DB Chunks Explorer"
+          type="button"
+        >
+          <span>📚 Knowledge Base:</span>
+          <strong>{chunkCount} chunks in DB</strong>
+          <span className="rag-btn-pill">Manage Notes</span>
+        </button>
+      </div>
+
       {messages.length === 0 ? (
         <div className="chat-page__welcome">
-          <WelcomePanel onSelectSuggestion={handleSendMessage} />
+          <WelcomePanel
+            onSelectSuggestion={handleSendMessage}
+            onOpenIngest={() => setModalOpen(true)}
+          />
         </div>
       ) : (
         <div className="chat-page__conversation">
@@ -112,8 +169,26 @@ export function ChatPage() {
         <ChatComposer
           isLoading={isLoading}
           onSend={handleSendMessage}
+          onOpenIngest={() => setModalOpen(true)}
         />
       </div>
+
+      {/* RAG Knowledge Base Modal */}
+      <RagKnowledgeModal
+        isOpen={isModalOpen}
+        onClose={() => setModalOpen(false)}
+        userId={userId}
+        sessionId={sessionId}
+        onUserChange={(newUid) => {
+          setUserId(newUid)
+          updateChunkCount(newUid, sessionId)
+        }}
+        onSessionChange={(newSid) => {
+          setSessionId(newSid)
+          updateChunkCount(userId, newSid)
+        }}
+        onDocumentIngested={() => updateChunkCount(userId, sessionId)}
+      />
     </section>
   )
 }

@@ -8,7 +8,7 @@ const suggestions = [
   { icon: 'sparkle', label: 'Generate an architecture flowchart', prompt: 'Create a step-by-step flowchart for RAG explaining how it works and what happens when' },
 ]
 
-export function WelcomePanel({ onSelectSuggestion }) {
+export function WelcomePanel({ onSelectSuggestion, onOpenIngest }) {
   return (
     <section aria-labelledby="welcome-title" className="welcome">
       <div className="welcome__illustration" aria-hidden="true">
@@ -28,6 +28,26 @@ export function WelcomePanel({ onSelectSuggestion }) {
         Ask questions, revise concepts, and generate active-recall flashcards & quizzes.<br className="welcome__desktop-break" />
         Connected with RAG and FastMCP study tools.
       </p>
+
+      {/* Prominent Knowledge Base Ingestion Card */}
+      <div className="welcome__ingest-card">
+        <div className="welcome__ingest-content">
+          <div className="welcome__ingest-badge">📥 Knowledge Base Ingestion</div>
+          <h3 className="welcome__ingest-heading">Upload or Ingest Your Study Materials</h3>
+          <p className="welcome__ingest-text">
+            Upload text files, PDFs, or paste lecture notes into your database to enable grounded answers, active-recall flashcards, and quizzes.
+          </p>
+        </div>
+        <button
+          className="welcome__ingest-btn"
+          onClick={onOpenIngest}
+          type="button"
+        >
+          <span>📥 Ingest Notes / Data File</span>
+          <span className="welcome__ingest-arrow">→</span>
+        </button>
+      </div>
+
       <div aria-label="Try asking" className="suggestion-list">
         {suggestions.map((suggestion) => (
           <button

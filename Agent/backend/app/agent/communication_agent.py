@@ -917,6 +917,16 @@ class CommunicationAgent:
                         "excerpt": str(c.get("text", ""))[:120] + "...",
                         "page": c.get("page")
                     })
+                elif hasattr(c, "text"):
+                    raw_text_chunks.append(c.text)
+                    sources.append({
+                        "document_id": getattr(c, "document_id", f"doc-{idx+1}"),
+                        "title": getattr(c, "title", "Study Notes"),
+                        "chunk_id": getattr(c, "chunk_id", f"chunk-{idx+1}"),
+                        "section": getattr(c, "section", "General"),
+                        "excerpt": str(c.text)[:120] + "...",
+                        "page": getattr(c, "page", None),
+                    })
                 elif isinstance(c, str):
                     raw_text_chunks.append(c)
         else:
