@@ -144,9 +144,11 @@ class FlowchartGeneratorTool:
 
     def _sanitize_label(self, label: str) -> str:
         """Sanitizes text for safe inclusion inside Mermaid node brackets."""
-        # Remove quotes, newlines, and unescaped brackets
-        cleaned = label.replace('"', "'").replace("\n", " ").strip()
-        cleaned = re.sub(r'[\(\)\[\]\{\}]', '', cleaned)
+        # Strip XML/HTML tags
+        cleaned = re.sub(r'<[^>]+>', '', label)
+        # Remove quotes, newlines, backslashes, brackets, and characters that break Mermaid syntax
+        cleaned = cleaned.replace('"', "'").replace("\n", " ").replace("\\", "").strip()
+        cleaned = re.sub(r'[\(\)\[\]\{\}<>]', '', cleaned)
         return cleaned
 
     def _get_curated_blueprint(self, topic: str, orientation: str = "TD") -> Optional[Dict[str, Any]]:
@@ -351,11 +353,23 @@ flowchart {orientation}
 
         if context_chunks:
             for chk in context_chunks:
+                chk_str = str(chk)
+                # Strip XML tags like <context>, <source...>, </source>, </context>
+                chk_str = re.sub(r'<[^>]+>', '', chk_str)
+                # Strip untrusted notices and disclaimers
+                chk_str = re.sub(r'(?i)untrusted\s+student\s+data\s+notice:?', '', chk_str)
+                chk_str = re.sub(r'(?i)the\s+following\s+passages\s+are\s+student-provided.*?passages\.', '', chk_str)
                 # Extract clean declarative sentences
-                raw_sentences = re.split(r'(?<=[.!?])\s+', str(chk))
+                raw_sentences = re.split(r'(?<=[.!?])\s+', chk_str)
                 for s in raw_sentences:
                     cleaned = s.strip()
-                    if len(cleaned.split()) >= 4 and not cleaned.startswith("#"):
+                    cleaned_lower = cleaned.lower()
+                    if (
+                        len(cleaned.split()) >= 4 
+                        and not cleaned.startswith("#")
+                        and "passive factual data" not in cleaned_lower
+                        and "untrusted" not in cleaned_lower
+                    ):
                         sentences.append(cleaned)
 
         # Fallback default workflow stages if context is sparse

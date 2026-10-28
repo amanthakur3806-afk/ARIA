@@ -72,7 +72,12 @@ class UserScopedRagStore:
     # ------------------------------------------------------------------
 
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA busy_timeout=30000;")
+        except Exception:
+            pass
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -190,7 +195,11 @@ class UserScopedRagStore:
             raise ValueError("user_id is required")
         if not session_id:
             session_id = "default"
-        if not text or not text.strip():
+        
+        # Clean null bytes and normalize whitespace
+        text = (text or "").replace("\x00", "").strip()
+        title = (title or "").replace("\x00", "").strip() or "Notes"
+        if not text:
             return 0
 
         # Extract structured chunks
@@ -282,14 +291,16 @@ class UserScopedRagStore:
         with self._lock:
             candidates = list(self._chunks_by_user.get(user_id, []))
 
-            # Filter by session_id if specified
+            # Filter by session_id if specified, but fall back to all user documents if none in session
             if session_id is not None and candidates:
                 allowed_docs = {
                     d_id
                     for d_id, meta in self._docs_by_user.get(user_id, {}).items()
                     if meta.get("session_id") == session_id
                 }
-                candidates = [c for c in candidates if c.document_id in allowed_docs]
+                session_candidates = [c for c in candidates if c.document_id in allowed_docs]
+                if session_candidates:
+                    candidates = session_candidates
 
             # Fallback to default curriculum if no candidates found
             if not candidates and allow_curriculum_fallback:
@@ -323,6 +334,7 @@ class UserScopedRagStore:
         limit: int = 100,
     ) -> List[dict]:
         """List chunk details for inspection and UI display."""
+        safe_limit = limit if isinstance(limit, int) else 100
         with self._lock:
             candidates = self._chunks_by_user.get(user_id, [])
             results = []
@@ -343,7 +355,7 @@ class UserScopedRagStore:
                         "language": c.language,
                     }
                 )
-                if len(results) >= limit:
+                if len(results) >= safe_limit:
                     break
             return results
 

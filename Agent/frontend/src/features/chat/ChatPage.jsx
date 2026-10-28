@@ -50,17 +50,34 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     }
 
-    setMessages((prev) => [...prev, userMessage])
+    const assistantId = `ast_${Date.now() + 1}`
+    const placeholderAssistant = {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+      intent: 'explain_and_plan',
+      language: 'en',
+      sources: [],
+      actions: [],
+      structured_data: null,
+      latency_profile: null,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isStreaming: true,
+    }
+
+    // Insert user message and assistant placeholder together upfront (immune to React StrictMode)
+    setMessages((prev) => [...prev, userMessage, placeholderAssistant])
     setIsLoading(true)
 
     try {
-      const response = await fetch(`/api/v1/chat/threads/${encodeURIComponent(sessionId)}/messages`, {
+      const response = await fetch(`/api/v1/chat/threads/${encodeURIComponent(sessionId)}/messages/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
           user_id: userId,
           thread_id: sessionId,
+          stream: true,
         }),
       })
 
@@ -69,38 +86,186 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
         throw new Error(errorData.detail || `Server returned ${response.status}`)
       }
 
-      const data = await response.json()
-      const assistantData = data.assistant_message || {}
+      const contentType = response.headers.get('content-type') || ''
+      const isStream = contentType.includes('text/event-stream') && response.body
 
-      const assistantMessage = {
-        id: assistantData.id || `ast_${Date.now()}`,
-        role: 'assistant',
-        content: assistantData.content || 'I processed your request.',
-        intent: assistantData.intent,
-        language: assistantData.language,
-        sources: assistantData.sources || [],
-        actions: assistantData.actions || [],
-        structured_data: assistantData.structured_data || null,
-        latency_profile: assistantData.latency_profile || null,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      if (isStream) {
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder('utf-8')
+        let buffer = ''
+        let streamClosed = false
+
+        // Smooth typewriter pacing queue
+        const tokenQueue = []
+        let displayedContent = ''
+        let pendingStructured = null
+        let pendingLatency = null
+        let tickerId = null
+
+        // Ticker drains words at human reading pace (25ms interval)
+        const startPacer = () => {
+          if (tickerId) return
+          tickerId = setInterval(() => {
+            if (tokenQueue.length > 0) {
+              // Smooth dynamic pacing: 1 word if queue is small, scales up if queue is large
+              const step = tokenQueue.length > 45 ? 4 : (tokenQueue.length > 15 ? 2 : 1)
+              const nextBatch = tokenQueue.splice(0, step).join('')
+              displayedContent += nextBatch
+
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId ? { ...m, content: displayedContent } : m
+                )
+              )
+            } else if (streamClosed) {
+              // Queue fully drained and server stream is closed
+              clearInterval(tickerId)
+              tickerId = null
+
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantId
+                    ? {
+                        ...m,
+                        content: displayedContent,
+                        structured_data: pendingStructured || m.structured_data,
+                        latency_profile: pendingLatency || m.latency_profile,
+                        isStreaming: false,
+                      }
+                    : m
+                )
+              )
+              setIsLoading(false)
+            }
+          }, 24)
+        }
+
+        startPacer()
+
+        while (!streamClosed) {
+          const { value, done } = await reader.read()
+          if (done) {
+            streamClosed = true
+            break
+          }
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const rawLine of lines) {
+            const line = rawLine.trim()
+            if (!line || !line.startsWith('data:')) continue
+
+            const payloadStr = line.replace(/^data:\s*/, '').trim()
+            if (payloadStr === '[DONE]') {
+              streamClosed = true
+              break
+            }
+
+            try {
+              const event = JSON.parse(payloadStr)
+              if (event.type === 'metadata') {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId
+                      ? {
+                          ...m,
+                          intent: event.intent || m.intent,
+                          language: event.language || m.language,
+                          sources: event.sources || m.sources,
+                        }
+                      : m
+                  )
+                )
+              } else if (event.type === 'token') {
+                // Break incoming token chunk into individual words and whitespace for natural typewriter rhythm
+                const words = (event.content || '').match(/\S+|\s+/g) || []
+                for (const w of words) {
+                  tokenQueue.push(w)
+                }
+              } else if (event.type === 'structured_data') {
+                pendingStructured = event.structured_data || null
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId
+                      ? {
+                          ...m,
+                          actions: event.actions || m.actions,
+                        }
+                      : m
+                  )
+                )
+              } else if (event.type === 'complete') {
+                pendingLatency = event.latency_profile || null
+              } else if (event.type === 'error') {
+                throw new Error(event.message || 'Stream processing error')
+              }
+            } catch (err) {
+              if (err.message && err.message.includes('Stream processing error')) {
+                throw err
+              }
+            }
+          }
+        }
+
+        // Flush remaining buffer into token queue if present
+        if (buffer && buffer.trim().startsWith('data:')) {
+          const payloadStr = buffer.trim().replace(/^data:\s*/, '').trim()
+          if (payloadStr !== '[DONE]') {
+            try {
+              const event = JSON.parse(payloadStr)
+              if (event.type === 'token') {
+                const words = (event.content || '').match(/\S+|\s+/g) || []
+                for (const w of words) {
+                  tokenQueue.push(w)
+                }
+              } else if (event.type === 'complete') {
+                pendingLatency = event.latency_profile || null
+              }
+            } catch (e) {}
+          }
+        }
+
+        streamClosed = true
+      } else {
+        const data = await response.json()
+        const assistantData = data.assistant_message || {}
+
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? {
+                  ...m,
+                  content: assistantData.content || 'I processed your request.',
+                  intent: assistantData.intent,
+                  language: assistantData.language,
+                  sources: assistantData.sources || [],
+                  actions: assistantData.actions || [],
+                  structured_data: assistantData.structured_data || null,
+                  latency_profile: assistantData.latency_profile || null,
+                  isStreaming: false,
+                }
+              : m
+          )
+        )
+        setIsLoading(false)
       }
-
-      setMessages((prev) => [...prev, assistantMessage])
     } catch (err) {
       console.error('Chat error:', err)
       setError(`Connection error: ${err.message}. Ensure backend is running.`)
-      // Add a fallback assistant message explaining the error
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `err_${Date.now()}`,
-          role: 'assistant',
-          content: `⚠️ **Unable to connect to ARIA backend.**\n\n*Error details:* ${err.message}\n\nPlease verify that the backend server is running on \`http://127.0.0.1:8000\`.`,
-          isError: true,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ])
-    } finally {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantId
+            ? {
+                ...m,
+                content: `⚠️ **Unable to connect to ARIA backend.**\n\n*Error details:* ${err.message}\n\nPlease verify that the backend server is running on \`http://127.0.0.1:8000\`.`,
+                isError: true,
+                isStreaming: false,
+              }
+            : m
+        )
+      )
       setIsLoading(false)
     }
   }
@@ -147,7 +312,7 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
               <MessageItem key={msg.id} message={msg} />
             ))}
 
-            {isLoading && (
+            {isLoading && !messages.some((m) => m.isStreaming) && (
               <div className="chat-page__loading-wrap">
                 <div className="assistant-avatar">A</div>
                 <div className="chat-thinking">
@@ -222,7 +387,18 @@ function MessageItem({ message }) {
         </div>
 
         <div className="message__bubble message__bubble--assistant">
-          <MarkdownRenderer text={message.content} />
+          {!message.content && message.isStreaming ? (
+            <div className="chat-thinking chat-thinking--inline" title="ARIA is synthesizing...">
+              <span />
+              <span />
+              <span />
+            </div>
+          ) : (
+            <MarkdownRenderer text={message.content} />
+          )}
+          {message.isStreaming && message.content && (
+            <span className="streaming-cursor" title="ARIA is writing...">▍</span>
+          )}
 
           {/* Interactive Structured Widgets */}
           {message.structured_data?.flashcards && (
@@ -251,59 +427,77 @@ function MessageItem({ message }) {
   )
 }
 
-// Simple safe Markdown Renderer
+// Simple safe Markdown Renderer preserving code blocks & Mermaid diagrams
 function MarkdownRenderer({ text }) {
   if (!text) return null
 
-  // Split into paragraphs
-  const paragraphs = text.split('\n\n')
+  // Tokenize blocks into code/mermaid fences and normal text to prevent breaking multiline diagrams
+  const blocks = []
+  const fenceRegex = /```(mermaid|[a-z0-9_-]*)[\r\n]([\s\S]*?)```/gi
+  let lastIndex = 0
+  let match
+
+  while ((match = fenceRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      blocks.push({ type: 'text', content: text.substring(lastIndex, match.index) })
+    }
+    const tag = (match[1] || '').toLowerCase().trim()
+    blocks.push({
+      type: tag === 'mermaid' ? 'mermaid' : 'code',
+      lang: tag,
+      content: match[2].trim()
+    })
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < text.length) {
+    blocks.push({ type: 'text', content: text.substring(lastIndex) })
+  }
 
   return (
     <div className="markdown-body">
-      {paragraphs.map((para, idx) => {
-        const trimmed = para.trim()
-        if (!trimmed) return null
-
-        if (trimmed.startsWith('### ')) {
-          return <h3 key={idx}>{trimmed.replace('### ', '')}</h3>
+      {blocks.map((block, bIdx) => {
+        if (block.type === 'mermaid') {
+          return <MermaidDiagram key={bIdx} code={block.content} />
         }
-        // Mermaid diagram code blocks
-        if (trimmed.startsWith('```mermaid') || trimmed.includes('```mermaid')) {
-          const match = trimmed.match(/```mermaid([\s\S]*?)```/)
-          const mermaidCode = match ? match[1].trim() : trimmed.replace(/```mermaid/gi, '').replace(/```/g, '').trim()
-          return <MermaidDiagram key={idx} code={mermaidCode} />
-        }
-
-        // Generic code blocks
-        if (trimmed.startsWith('```')) {
-          const code = trimmed.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '')
+        if (block.type === 'code') {
           return (
-            <pre key={idx} className="code-block" style={{ padding: '10px 12px', background: '#1e1e1e', color: '#d4d4d4', borderRadius: '6px', overflowX: 'auto', fontSize: '12px' }}>
-              <code>{code}</code>
+            <pre key={bIdx} className="code-block" style={{ padding: '10px 12px', background: '#1e1e1e', color: '#d4d4d4', borderRadius: '6px', overflowX: 'auto', fontSize: '12px' }}>
+              <code>{block.content}</code>
             </pre>
           )
         }
 
-        if (trimmed.startsWith('## ')) {
-          return <h2 key={idx}>{trimmed.replace('## ', '')}</h2>
-        }
-        if (trimmed.startsWith('# ')) {
-          return <h1 key={idx}>{trimmed.replace('# ', '')}</h1>
-        }
+        // Render normal text block split into paragraphs
+        const paragraphs = block.content.split(/\r?\n\r?\n/)
+        return paragraphs.map((para, pIdx) => {
+          const trimmed = para.trim()
+          if (!trimmed) return null
+          const key = `${bIdx}_${pIdx}`
 
-        // Bullet lists
-        if (trimmed.includes('\n• ') || trimmed.includes('\n- ') || trimmed.startsWith('• ') || trimmed.startsWith('- ')) {
-          const items = trimmed.split(/\n[•-]\s*/).map((s) => s.replace(/^[•-]\s*/, ''))
-          return (
-            <ul key={idx}>
-              {items.map((item, i) => (
-                <li key={i} dangerouslySetInnerHTML={{ __html: formatInline(item) }} />
-              ))}
-            </ul>
-          )
-        }
+          if (trimmed.startsWith('### ')) {
+            return <h3 key={key}>{trimmed.replace('### ', '')}</h3>
+          }
+          if (trimmed.startsWith('## ')) {
+            return <h2 key={key}>{trimmed.replace('## ', '')}</h2>
+          }
+          if (trimmed.startsWith('# ')) {
+            return <h1 key={key}>{trimmed.replace('# ', '')}</h1>
+          }
 
-        return <p key={idx} dangerouslySetInnerHTML={{ __html: formatInline(trimmed) }} />
+          // Bullet lists
+          if (trimmed.includes('\n• ') || trimmed.includes('\n- ') || trimmed.startsWith('• ') || trimmed.startsWith('- ')) {
+            const items = trimmed.split(/\r?\n[•-]\s*/).map((s) => s.replace(/^[•-]\s*/, ''))
+            return (
+              <ul key={key}>
+                {items.map((item, i) => (
+                  <li key={i} dangerouslySetInnerHTML={{ __html: formatInline(item) }} />
+                ))}
+              </ul>
+            )
+          }
+
+          return <p key={key} dangerouslySetInnerHTML={{ __html: formatInline(trimmed) }} />
+        })
       })}
     </div>
   )
