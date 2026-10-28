@@ -6,6 +6,57 @@ import { FlowchartWidget, MermaidDiagram } from './FlowchartWidget'
 import { RagKnowledgeModal } from '../rag/RagKnowledgeModal'
 import './ChatPage.css'
 
+async function readChatStream(response, onToken, onComplete) {
+  if (!response.body) {
+    throw new Error('The server did not provide a streaming response.')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let completed = false
+
+  function dispatchEvent(rawEvent) {
+    let eventName = ''
+    const dataLines = []
+    for (const line of rawEvent.split('\n')) {
+      if (line.startsWith('event:')) eventName = line.slice(6).trim()
+      if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
+    }
+
+    if (!dataLines.length) return
+    const eventData = JSON.parse(dataLines.join('\n'))
+    if (eventName === 'token') onToken(eventData.content)
+    if (eventName === 'error') throw new Error(eventData.detail || 'The response stream failed.')
+    if (eventName === 'complete') {
+      completed = true
+      onComplete(eventData)
+    }
+  }
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      buffer += decoder.decode(value, { stream: !done })
+      buffer = buffer.replace(/\r\n/g, '\n')
+
+      let eventBoundary = buffer.indexOf('\n\n')
+      while (eventBoundary !== -1) {
+        dispatchEvent(buffer.slice(0, eventBoundary))
+        buffer = buffer.slice(eventBoundary + 2)
+        eventBoundary = buffer.indexOf('\n\n')
+      }
+
+      if (done) break
+    }
+
+    if (buffer.trim()) dispatchEvent(buffer)
+    if (!completed) throw new Error('The response stream ended before completion.')
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSetIsOpen }) {
   const [messages, setMessages] = useState([])
   const [isLoading, setIsLoading] = useState(false)
@@ -31,7 +82,8 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
   }
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const isStreaming = messages.some((message) => message.isStreaming)
+    messagesEndRef.current?.scrollIntoView({ behavior: isStreaming ? 'auto' : 'smooth' })
   }, [messages, isLoading])
 
   async function updateChunkCount(uid = userId, sid = sessionId) {
@@ -60,14 +112,24 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
       content: text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     }
+    const assistantMessageId = `ast_${Date.now()}`
 
-    setMessages((prev) => [...prev, userMessage])
+    setMessages((prev) => [...prev, userMessage, {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      isStreaming: true,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    }])
     setIsLoading(true)
 
     try {
-      const response = await fetch(`/api/v1/chat/threads/${encodeURIComponent(sessionId)}/messages`, {
+      const response = await fetch(`/api/v1/chat/threads/${encodeURIComponent(sessionId)}/messages/stream`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        },
         body: JSON.stringify({
           message: text,
           user_id: userId,
@@ -80,37 +142,45 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
         throw new Error(errorData.detail || `Server returned ${response.status}`)
       }
 
-      const data = await response.json()
-      const assistantData = data.assistant_message || {}
-
-      const assistantMessage = {
-        id: assistantData.id || `ast_${Date.now()}`,
-        role: 'assistant',
-        content: assistantData.content || 'I processed your request.',
-        intent: assistantData.intent,
-        language: assistantData.language,
-        sources: assistantData.sources || [],
-        actions: assistantData.actions || [],
-        structured_data: assistantData.structured_data || null,
-        latency_profile: assistantData.latency_profile || null,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      }
-
-      setMessages((prev) => [...prev, assistantMessage])
+      await readChatStream(
+        response,
+        (content) => {
+          setMessages((prev) => prev.map((message) => (
+            message.id === assistantMessageId
+              ? { ...message, content: message.content + content }
+              : message
+          )))
+        },
+        (data) => {
+          const assistantData = data.assistant_message || {}
+          setMessages((prev) => prev.map((message) => (
+            message.id === assistantMessageId
+              ? {
+                  ...message,
+                  ...assistantData,
+                  id: assistantData.id || assistantMessageId,
+                  role: 'assistant',
+                  content: message.content,
+                  isStreaming: false,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                }
+              : message
+          )))
+        },
+      )
     } catch (err) {
       console.error('Chat error:', err)
-      setError(`Connection error: ${err.message}. Ensure backend is running.`)
-      // Add a fallback assistant message explaining the error
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `err_${Date.now()}`,
-          role: 'assistant',
-          content: `⚠️ **Unable to connect to ARIA backend.**\n\n*Error details:* ${err.message}\n\nPlease verify that the backend server is running on \`http://127.0.0.1:8000\`.`,
-          isError: true,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        },
-      ])
+      setError(`Chat request failed: ${err.message}`)
+      setMessages((prev) => prev.map((message) => (
+        message.id === assistantMessageId
+          ? {
+              ...message,
+              content: `⚠️ **Unable to complete this response.**\n\n*Error details:* ${err.message}`,
+              isError: true,
+              isStreaming: false,
+            }
+          : message
+      )))
     } finally {
       setIsLoading(false)
     }
@@ -158,7 +228,7 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
               <MessageItem key={msg.id} message={msg} />
             ))}
 
-            {isLoading && (
+            {isLoading && !messages.some((message) => message.isStreaming && message.content) && (
               <div className="chat-page__loading-wrap">
                 <div className="assistant-avatar">A</div>
                 <div className="chat-thinking">
@@ -234,7 +304,7 @@ function MessageItem({ message }) {
         </div>
 
         <div className="message__bubble message__bubble--assistant">
-          <MarkdownRenderer text={message.content} />
+          <MarkdownRenderer text={message.content} isStreaming={message.isStreaming} />
 
           {/* Interactive Structured Widgets */}
           {message.structured_data?.flashcards && (
@@ -264,14 +334,14 @@ function MessageItem({ message }) {
 }
 
 // Simple safe Markdown Renderer
-function MarkdownRenderer({ text }) {
+function MarkdownRenderer({ text, isStreaming = false }) {
   if (!text) return null
 
   // Split into paragraphs
   const paragraphs = text.split('\n\n')
 
   return (
-    <div className="markdown-body">
+    <div className={`markdown-body${isStreaming ? ' markdown-body--streaming' : ''}`}>
       {paragraphs.map((para, idx) => {
         const trimmed = para.trim()
         if (!trimmed) return null

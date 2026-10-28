@@ -7,15 +7,19 @@ FastMCP Study Tools, and the Persistent User-Scoped RAG Store.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from queue import Queue
+from threading import Thread
+from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 # Ensure project paths are in sys.path
@@ -91,7 +95,11 @@ def health_check():
 
 @app.post("/api/v1/chat/threads/{thread_id}/messages")
 @app.post("/api/chat")
-def handle_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = None):
+def handle_chat_message(
+    payload: ChatMessageRequest,
+    thread_id: Optional[str] = None,
+    on_token: Optional[Callable[[str], None]] = None,
+):
     """
     Primary chat endpoint:
     Processes user messages through the Communication Agent, scoped to the user and session RAG store.
@@ -127,6 +135,9 @@ def handle_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = 
                 )
 
             persist_turn(user_id, message_text, default_reply, intent="no_data_prompt", language="en")
+            if on_token:
+                for offset in range(0, len(default_reply), 32):
+                    on_token(default_reply[offset:offset + 32])
 
             return {
                 "thread_id": resolved_thread_id,
@@ -158,13 +169,29 @@ def handle_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = 
             allow_curriculum_fallback=False,
         )
 
+        streamed_content: List[str] = []
+
+        def emit_token(token: str):
+            if on_token:
+                on_token(token)
+                streamed_content.append(token)
+
         response = agent.handle_message(
             message=message_text,
             user_id=user_id,
             thread_id=resolved_thread_id,
             context_chunks=matched_chunks if matched_chunks else None,
             user_preferences=payload.preferences,
+            on_token=emit_token if on_token else None,
         )
+        if on_token:
+            emitted_text = "".join(streamed_content)
+            if response.content.startswith(emitted_text):
+                remaining_content = response.content[len(emitted_text):]
+            else:
+                remaining_content = response.content
+            for offset in range(0, len(remaining_content), 32):
+                on_token(remaining_content[offset:offset + 32])
 
         user_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
         assistant_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
@@ -199,6 +226,51 @@ def handle_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = 
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent execution error: {str(e)}")
+
+
+@app.post("/api/v1/chat/threads/{thread_id}/messages/stream")
+def stream_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = None):
+    """Streams generated chat text and sends response metadata when the turn completes."""
+    if not payload.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
+    events: Queue = Queue()
+
+    def generate_events():
+        def process_message():
+            try:
+                result = handle_chat_message(
+                    payload,
+                    thread_id,
+                    on_token=lambda content: events.put(("token", {"content": content})),
+                )
+                assistant_message = result["assistant_message"]
+                metadata = {key: value for key, value in assistant_message.items() if key != "content"}
+                events.put(("complete", {
+                    "thread_id": result["thread_id"],
+                    "user_id": result["user_id"],
+                    "assistant_message": metadata,
+                }))
+            except HTTPException as error:
+                events.put(("error", {"detail": error.detail}))
+            except Exception as error:
+                events.put(("error", {"detail": str(error)}))
+            finally:
+                events.put(("end", None))
+
+        Thread(target=process_message, daemon=True).start()
+        while True:
+            event_name, event_data = events.get()
+            if event_name == "end":
+                break
+            encoded_data = json.dumps(event_data, ensure_ascii=False)
+            yield f"event: {event_name}\ndata: {encoded_data}\n\n"
+
+    return StreamingResponse(
+        generate_events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/v1/documents/ingest")
@@ -282,4 +354,3 @@ def delete_document(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
-
