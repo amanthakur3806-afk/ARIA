@@ -4,43 +4,43 @@
 
 .app-shell__main {
   min-height: 100dvh;
-  margin-left: 256px;
+  margin-left: 276px;
 }
 
 .app-shell__content {
-  min-height: calc(100dvh - 65px);
+  min-height: calc(100dvh - 72px);
 }
 
 .app-shell__notice {
   position: fixed;
   z-index: 15;
-  top: 76px;
-  right: 24px;
+  top: 88px;
+  right: 28px;
   display: flex;
   max-width: min(430px, calc(100vw - 32px));
   align-items: center;
   gap: 14px;
-  padding: 11px 12px 11px 15px;
+  padding: 14px 14px 14px 18px;
   border: 1px solid var(--color-border-strong);
-  border-radius: 9px;
+  border-radius: 12px;
   color: var(--color-text);
   background: var(--color-surface);
-  box-shadow: 0 8px 28px rgb(0 0 0 / 10%);
-  font-size: 12px;
+  box-shadow: 0 14px 36px rgb(34 42 34 / 12%);
+  font-size: 13px;
 }
 
 .app-shell__notice button {
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   flex: 0 0 auto;
   place-items: center;
   border: 0;
-  border-radius: 6px;
+  border-radius: 8px;
   color: var(--color-text-muted);
   background: transparent;
   cursor: pointer;
-  font-size: 19px;
+  font-size: 20px;
 }
 
 .app-shell__notice button:hover {
@@ -57,11 +57,11 @@
   }
 
   .app-shell__content {
-    min-height: calc(100dvh - 59px);
+    min-height: calc(100dvh - 64px);
   }
 
   .app-shell__notice {
-    top: 68px;
+    top: 76px;
     right: 12px;
     left: 12px;
   }
@@ -72,6 +72,7 @@
     inset: 0;
     display: block;
     border: 0;
-    background: rgb(10 16 11 / 52%);
+    background: rgb(18 24 19 / 48%);
+    backdrop-filter: blur(2px);
   }
 }
