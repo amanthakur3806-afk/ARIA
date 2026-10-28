@@ -69,7 +69,9 @@ export function RagKnowledgeModal({
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
   const [sessionInput, setSessionInput] = useState(sessionId)
+  const [selectedFile, setSelectedFile] = useState(null)
   const [selectedFileName, setSelectedFileName] = useState('')
+  const [isDragging, setIsDragging] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [statusMessage, setStatusMessage] = useState(null)
 
@@ -139,8 +141,7 @@ export function RagKnowledgeModal({
     }
   }
 
-  function handleFileUpload(e) {
-    const file = e.target.files?.[0]
+  function handleFileSelected(file) {
     if (!file) return
     setStatusMessage(null)
     setSelectedFileName(file.name)
@@ -154,37 +155,72 @@ export function RagKnowledgeModal({
 
   async function handleIngest(e) {
     e.preventDefault()
-    if (!text.trim()) return
+
+    const hasFile = Boolean(selectedFile)
+    const hasText = Boolean(text.trim())
+
+    if (!hasFile && !hasText) {
+      setStatusMessage({
+        type: 'error',
+        text: 'Please select a document file or enter study notes before indexing.',
+      })
+      return
+    }
 
     setIsSubmitting(true)
     setStatusMessage(null)
 
     try {
-      const res = await fetch('/api/v1/documents/ingest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: title.trim() || selectedFileName || 'Uploaded Study Notes',
-          text: text.trim(),
-          user_id: userId,
-          session_id: sessionInput.trim() || 'thread-1',
-        }),
-      })
+      let data
+      if (hasFile) {
+        // Multipart upload endpoint for PDF, TXT, MD, JSON, etc.
+        const formData = new FormData()
+        formData.append('file', selectedFile)
+        formData.append('user_id', userId)
+        formData.append('session_id', sessionInput.trim() || 'thread-1')
+        if (title.trim()) {
+          formData.append('title', title.trim())
+        }
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail || 'Ingestion failed')
+        const res = await fetch('/api/v1/documents/upload', {
+          method: 'POST',
+          body: formData,
+        })
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.detail || `Upload failed (Status ${res.status})`)
+        }
+        data = await res.json()
+      } else {
+        // Direct text ingest for manually typed notes or sample presets
+        const res = await fetch('/api/v1/documents/ingest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: title.trim() || 'Uploaded Study Notes',
+            text: text.trim(),
+            user_id: userId,
+            session_id: sessionInput.trim() || 'thread-1',
+          }),
+        })
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.detail || `Ingestion failed (Status ${res.status})`)
+        }
+        data = await res.json()
       }
 
-      const data = await res.json()
       setStatusMessage({
         type: 'success',
-        text: `Successfully indexed ${data.chunks_indexed} chunk(s) into database for student "${data.user_id}" in session "${data.session_id}". Total database chunks: ${data.user_total_chunks}. Grounded queries are now active!`,
+        text: `Successfully indexed ${data.chunks_indexed} chunk(s) from "${data.title}" into database for student "${data.user_id}" in session "${data.session_id}". Total database chunks: ${data.user_total_chunks}. Grounded queries are now active!`,
       })
 
       // Clear form & refresh
       setTitle('')
       setText('')
+      setSelectedFile(null)
       setSelectedFileName('')
       loadChunks()
       fetchHealthStats()
@@ -217,17 +253,23 @@ export function RagKnowledgeModal({
   }
 
   function applyPreset(preset) {
+    setSelectedFile(null)
+    setSelectedFileName('')
     setTitle(preset.title)
     setSessionInput(preset.session)
     setText(preset.text)
-    setSelectedFileName('')
     if (onSessionChange) onSessionChange(preset.session)
   }
 
   if (!isOpen) return null
 
   return (
-    <div className="rag-modal-overlay" onClick={onClose}>
+    <div
+      className="rag-modal-overlay"
+      onClick={onClose}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => e.preventDefault()}
+    >
       <div className="rag-modal" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="rag-modal__header">
@@ -309,30 +351,36 @@ export function RagKnowledgeModal({
                 </div>
               )}
 
-              {/* File Upload Box */}
+              {/* File Upload Box with Drag & Drop */}
               <div className="form-group">
-                <label className="form-label">Upload a Data File (.txt, .md, .json)</label>
-                <div className="file-drop-zone">
+                <label className="form-label">Upload a Document File (.pdf, .txt, .md, .json, .csv)</label>
+                <div
+                  className={`file-drop-zone ${isDragging ? 'file-drop-zone--dragging' : ''}`}
+                  onDragOver={handleDragOver}
+                  onDragEnter={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                >
                   <label className="file-drop-label">
                     <span className="file-drop-icon">📁</span>
                     <div className="file-drop-text">
-                      <strong>Choose a file from your computer</strong>
-                      <span>Supports .txt, .md, .json notes & lecture files</span>
+                      <strong>Choose a file from your computer or drag & drop here</strong>
+                      <span>Supports PDF textbook slides, Markdown, and TXT notes (up to 10 MB)</span>
                     </div>
                     <input
                       type="file"
-                      accept=".txt,.md,.json,.csv,.pdf"
-                      onChange={handleFileUpload}
+                      accept=".pdf,.txt,.md,.json,.csv"
+                      onChange={handleFileInputChange}
                       style={{ display: 'none' }}
                     />
                   </label>
                   {selectedFileName && (
                     <div className="selected-file-badge">
-                      <span>📄 Selected: <strong>{selectedFileName}</strong></span>
+                      <span>📄 Selected: <strong>{selectedFileName}</strong> {selectedFile ? `(${(selectedFile.size / 1024).toFixed(1)} KB)` : ''}</span>
                       <button
                         type="button"
                         className="file-remove-btn"
-                        onClick={() => { setSelectedFileName(''); setText(''); }}
+                        onClick={handleRemoveFile}
                       >
                         ✕ Remove
                       </button>
@@ -368,14 +416,22 @@ export function RagKnowledgeModal({
               </div>
 
               <div className="form-group">
-                <label className="form-label">Study Notes / Curriculum Content</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label className="form-label">Study Notes / Curriculum Content</label>
+                  {selectedFile && selectedFile.name.toLowerCase().endsWith('.pdf') && (
+                    <span style={{ fontSize: '0.78rem', color: '#a78bfa', fontWeight: 600 }}>
+                      ⚡ PDF Attached: Text will be parsed and indexed on submission
+                    </span>
+                  )}
+                </div>
                 <textarea
                   className="form-textarea"
-                  placeholder="Paste your study notes, textbook excerpts, or lecture transcripts here. ARIA will automatically extract semantic chunks and persist them into the user-scoped SQLite database."
+                  placeholder="Paste your study notes, textbook excerpts, or lecture transcripts here, or upload a document file above."
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   rows={8}
-                  required
+                  readOnly={Boolean(selectedFile && selectedFile.name.toLowerCase().endsWith('.pdf'))}
+                  required={!selectedFile}
                 />
               </div>
 

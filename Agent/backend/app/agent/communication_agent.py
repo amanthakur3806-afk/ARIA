@@ -23,10 +23,10 @@ import sys
 import time
 from collections import Counter
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 # ------------------------------------------------------------------------------
 # 0. Load Environment Configuration (.env)
@@ -68,6 +68,42 @@ RAG_CHUNK_SIZE = int(os.getenv("RAG_CHUNK_SIZE", "350"))
 RAG_CHUNK_OVERLAP = int(os.getenv("RAG_CHUNK_OVERLAP", "60"))
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "3"))
 MAX_LATENCY_MS = float(os.getenv("MAX_ACCEPTABLE_LATENCY_MS", "2000.0"))
+
+# Guardrail & Safety Architecture Imports
+try:
+    from app.agent.guardrails import (
+        ANSWER_POLICY_MODE,
+        CROSS_USER_REFUSAL_MESSAGE,
+        DEFAULT_TOP_K,
+        DecisionPath,
+        GUARDRAIL_SYSTEM_PROMPT,
+        InputGuard,
+        NO_CONTEXT_MESSAGE,
+        OutputGuard,
+        RAG_MIN_SCORE,
+        RetrievalGate,
+        SECURITY_REFUSAL_MESSAGE,
+        VALIDATION_ERROR_EMPTY,
+        build_context,
+        decision_logger,
+    )
+except ImportError:
+    from .guardrails import (
+        ANSWER_POLICY_MODE,
+        CROSS_USER_REFUSAL_MESSAGE,
+        DEFAULT_TOP_K,
+        DecisionPath,
+        GUARDRAIL_SYSTEM_PROMPT,
+        InputGuard,
+        NO_CONTEXT_MESSAGE,
+        OutputGuard,
+        RAG_MIN_SCORE,
+        RetrievalGate,
+        SECURITY_REFUSAL_MESSAGE,
+        VALIDATION_ERROR_EMPTY,
+        build_context,
+        decision_logger,
+    )
 
 # Import FastMCP server and tool functions
 try:
@@ -150,11 +186,16 @@ class ChunkExtractor:
         Preserves Markdown headers, sentence boundaries, and applies sliding overlap.
         """
         chunks: List[DocumentChunk] = []
-        if not text or not text.strip():
+        if not text:
+            return chunks
+
+        # Remove null bytes and carriage returns
+        clean_text = text.replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n")
+        if not clean_text.strip():
             return chunks
 
         # Split into semantic lines while tracking section titles
-        lines = text.strip().split("\n")
+        lines = clean_text.strip().split("\n")
         current_section = "General Overview"
         buffer_text = ""
         buffer_start = 0
@@ -173,13 +214,32 @@ class ChunkExtractor:
                     current_section = clean_sec
 
             # Sentence segmentation inside line
-            sentences = re.split(r'(?<=[.?!])\s+(?=[A-Z0-9])', line_str)
-            for s in sentences:
-                s_clean = s.strip()
-                if not s_clean:
+            raw_sentences = re.split(r'(?<=[.?!])\s+(?=[A-Z0-9])', line_str)
+            sentences: List[str] = []
+            for s in raw_sentences:
+                s_strip = s.strip()
+                if not s_strip:
                     continue
+                # If a single sentence exceeds chunk_size, split safely on word boundaries
+                if len(s_strip) > self.chunk_size:
+                    words = s_strip.split()
+                    sub_buf: List[str] = []
+                    sub_len = 0
+                    for w in words:
+                        if sub_len + len(w) + 1 > self.chunk_size and sub_buf:
+                            sentences.append(" ".join(sub_buf))
+                            sub_buf = [w]
+                            sub_len = len(w)
+                        else:
+                            sub_buf.append(w)
+                            sub_len += len(w) + 1
+                    if sub_buf:
+                        sentences.append(" ".join(sub_buf))
+                else:
+                    sentences.append(s_strip)
 
-                if len(buffer_text) + len(s_clean) > self.chunk_size and len(buffer_text) >= 120:
+            for s_clean in sentences:
+                if (len(buffer_text) + len(s_clean) > self.chunk_size and len(buffer_text) >= 100) or len(buffer_text) > self.chunk_size * 2:
                     # Flush buffer as a chunk
                     cid = f"{document_id}_chk_{len(chunks) + 1}"
                     chunk_text = buffer_text.strip()
@@ -223,6 +283,26 @@ class ChunkExtractor:
         return chunks
 
 
+ENGLISH_STOP_WORDS = {
+    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are",
+    "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both",
+    "but", "by", "can", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does",
+    "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had",
+    "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her",
+    "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd",
+    "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself",
+    "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off",
+    "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own",
+    "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such",
+    "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there",
+    "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through",
+    "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're",
+    "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which",
+    "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you",
+    "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "tell", "give", "show", "please"
+}
+
+
 class BasicRetriever:
     """
     In-memory semantic and lexical retriever with normalized scoring and latency profiling.
@@ -237,12 +317,16 @@ class BasicRetriever:
         self.chunks = chunks
         self._doc_freq.clear()
         for c in chunks:
-            words = set(re.findall(r'\b\w+\b', c.text.lower()))
+            words = set(re.findall(r'\b\w+\b', (c.text + " " + c.section + " " + c.title).lower()))
             for w in words:
                 self._doc_freq[w] += 1
 
-    def _tokenize(self, text: str) -> List[str]:
-        return [w for w in re.findall(r'\b\w+\b', text.lower()) if len(w) > 2]
+    def _tokenize(self, text: str, filter_stops: bool = True) -> List[str]:
+        words = [w for w in re.findall(r'\b\w+\b', text.lower()) if len(w) > 1]
+        if filter_stops:
+            content = [w for w in words if w not in ENGLISH_STOP_WORDS]
+            return content if content else words
+        return words
 
     def retrieve(
         self,
@@ -255,32 +339,56 @@ class BasicRetriever:
         Returns: (chunks, scores, retrieval_latency_ms)
         """
         t0 = time.perf_counter()
-        query_tokens = self._tokenize(query)
+        query_tokens = self._tokenize(query, filter_stops=True)
         if not query_tokens or not self.chunks:
             latency_ms = (time.perf_counter() - t0) * 1000.0
             return [], [], latency_ms
 
         scored: List[Tuple[float, DocumentChunk]] = []
         total_docs = len(self.chunks)
+        q_lower = query.lower()
+
+        # Check for overview / summary queries
+        is_overview_query = any(w in q_lower for w in [
+            "summarize", "summary", "overview", "what is this paper", "what is this document",
+            "explain this paper", "explain this document", "who are the authors", "who wrote",
+            "main findings", "key findings", "takeaways", "introduction"
+        ])
 
         for chunk in self.chunks:
-            chunk_tokens = self._tokenize(chunk.text + " " + chunk.section + " " + chunk.title)
-            chunk_token_set = set(chunk_tokens)
+            chunk_tokens = self._tokenize(chunk.text + " " + chunk.section + " " + chunk.title, filter_stops=False)
+            c_counts = Counter(chunk_tokens)
             score = 0.0
+            matched_terms = 0
 
             for qt in query_tokens:
-                if qt in chunk_token_set:
-                    # TF-IDF weighting
-                    tf = chunk_tokens.count(qt) / max(1, len(chunk_tokens))
-                    idf = math.log((total_docs + 1) / (self._doc_freq.get(qt, 0) + 1)) + 1.0
+                if qt in c_counts:
+                    matched_terms += 1
+                    freq = c_counts[qt]
+                    # Saturated TF: diminishing returns for frequent repetitions
+                    tf = math.sqrt(freq)
+                    # Smoothed IDF
+                    df = self._doc_freq.get(qt, 0)
+                    idf = math.log((total_docs + 2.0) / (df + 1.0)) + 1.0
                     score += tf * idf
 
-            # Section boost if query matches section heading
-            if any(qt in chunk.section.lower() for qt in query_tokens):
-                score *= 1.3
+            # Section and title match boost
+            sec_title = (chunk.section + " " + chunk.title).lower()
+            if any(qt in sec_title for qt in query_tokens):
+                score *= 1.35
 
-            if score >= threshold:
-                scored.append((score, chunk))
+            # Overview / introductory chunk boost for summary queries
+            if is_overview_query:
+                c_sec_lower = chunk.section.lower()
+                if any(ind in c_sec_lower for ind in ["page 1", "page 2", "overview", "chapter 1", "introduction", "abstract", "general"]):
+                    score += 2.5
+
+            if query_tokens and score > 0:
+                overlap_ratio = matched_terms / len(query_tokens)
+                # Normalize to calibrated [0.0, 1.0] scale
+                norm_score = min(1.0, (score / (len(query_tokens) * 3.5)) * (0.5 + 0.5 * overlap_ratio))
+                if norm_score >= threshold:
+                    scored.append((norm_score, chunk))
 
         # Sort descending by relevance score
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -301,12 +409,16 @@ class BasicRAGPipeline:
     def __init__(self, chunk_size: int = RAG_CHUNK_SIZE, chunk_overlap: int = RAG_CHUNK_OVERLAP):
         self.extractor = ChunkExtractor(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         self.retriever = BasicRetriever()
+        self.all_chunks: List[DocumentChunk] = []
 
     def ingest_document(self, document_id: str, text: str, title: str = "Notes") -> List[DocumentChunk]:
         """Ingests raw text, extracts citation chunks, and indices them."""
-        chunks = self.extractor.extract_chunks(document_id=document_id, text=text, title=title)
-        self.retriever.index_chunks(chunks)
-        return chunks
+        # Replace any existing chunks with the same document_id
+        self.all_chunks = [c for c in self.all_chunks if c.document_id != document_id]
+        new_chunks = self.extractor.extract_chunks(document_id=document_id, text=text, title=title)
+        self.all_chunks.extend(new_chunks)
+        self.retriever.index_chunks(self.all_chunks)
+        return new_chunks
 
     def search(self, query: str, top_k: int = RAG_TOP_K) -> Tuple[List[DocumentChunk], List[float], float]:
         """Performs semantic search across the ingested document chunks."""
@@ -385,10 +497,10 @@ class LLMCommunicator:
             try:
                 try:
                     from groq import Groq
-                    client = Groq(api_key=self.groq_key)
+                    client = Groq(api_key=self.groq_key, timeout=4.0, max_retries=0)
                 except ImportError:
                     import openai
-                    client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=self.groq_key)
+                    client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=self.groq_key, timeout=4.0, max_retries=0)
 
                 ctx_block = "\n---\n".join(context_chunks) if context_chunks else "General academic knowledge context."
                 default_sys = (
@@ -450,7 +562,7 @@ class LLMCommunicator:
         if self.provider == "openai" and self.openai_key and not self.openai_key.startswith("your_"):
             try:
                 import openai
-                client = openai.OpenAI(api_key=self.openai_key)
+                client = openai.OpenAI(api_key=self.openai_key, max_retries=0)
                 ctx_block = "\n---\n".join(context_chunks) if context_chunks else "No specific notes provided."
                 sys_msg = (
                     f"You are ARIA, an expert study assistant. Answer strictly grounded in the provided notes. "
@@ -488,7 +600,12 @@ class LLMCommunicator:
         # 3. Intelligent Grounded Synthesis Engine (Zero-Dependency Standalone Fallback)
         ctx_snippet = ""
         if context_chunks:
-            ctx_snippet = " " + " ".join([c.strip() for c in context_chunks[:2]])
+            raw_c = " ".join([c.strip() for c in context_chunks[:2]])
+            clean_snippet = re.sub(r'<[^>]+>', '', raw_c)
+            clean_snippet = re.sub(r'(?i)untrusted\s+student\s+data\s+notice:?', '', clean_snippet)
+            clean_snippet = re.sub(r'(?i)the\s+following\s+passages\s+are\s+student-provided.*?passages\.', '', clean_snippet).strip()
+            if clean_snippet:
+                ctx_snippet = " " + clean_snippet[:300]
 
         if language == "hi-en":
             greeting = "Namaste! Ye raha aapka systematic explanation aur study guidance:"
@@ -509,6 +626,115 @@ class LLMCommunicator:
                 on_token(answer[offset:offset + 32])
         latency_ms = (time.perf_counter() - t0) * 1000.0
         return answer, latency_ms
+
+    def stream_response(
+        self,
+        prompt: str,
+        context_chunks: Optional[List[str]] = None,
+        language: str = "en",
+        temperature: float = 0.3,
+        system_instruction: Optional[str] = None
+    ) -> Iterator[str]:
+        """
+        Streams response tokens from Groq (primary) or OpenAI, with a graceful
+        chunked fallback to the grounded heuristic synthesis engine.
+        """
+        # 1. Groq Provider (Primary)
+        if self.provider == "groq" and self.groq_key and not self.groq_key.startswith("gsk_your_"):
+            try:
+                try:
+                    from groq import Groq
+                    client = Groq(api_key=self.groq_key, timeout=4.0, max_retries=0)
+                except ImportError:
+                    import openai
+                    client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=self.groq_key, timeout=4.0, max_retries=0)
+
+                ctx_block = "\n---\n".join(context_chunks) if context_chunks else "General academic knowledge context."
+                default_sys = (
+                    f"You are ARIA, an expert, encouraging academic tutor and study companion powered by Groq ({self.groq_model}). "
+                    f"Language: {language}.\n"
+                    f"Guidelines:\n"
+                    f"1. Explain the concepts thoroughly, pedagogically, and systematically with human-like warmth.\n"
+                    f"2. Synthesize and prioritize the provided course notes when they are relevant.\n"
+                    f"3. If the course notes are brief or do not fully cover the question, draw upon your deep academic knowledge to provide an insightful, complete explanation. Do NOT give robotic disclaimers about missing notes.\n"
+                    f"4. Include intuitive real-world analogies, high-yield takeaways, and pro-tips."
+                )
+                sys_msg = system_instruction or default_sys
+                safe_max_tokens = min(LLM_MAX_TOKENS, 700)
+
+                models_to_try = [self.groq_model]
+                if "openai/gpt-oss-20b" not in models_to_try:
+                    models_to_try.append("openai/gpt-oss-20b")
+
+                for model_candidate in models_to_try:
+                    try:
+                        stream = client.chat.completions.create(
+                            model=model_candidate,
+                            messages=[
+                                {"role": "system", "content": sys_msg},
+                                {"role": "user", "content": f"Context Notes:\n{ctx_block}\n\nQuestion/Task:\n{prompt}"}
+                            ],
+                            temperature=temperature,
+                            max_tokens=safe_max_tokens,
+                            stream=True
+                        )
+                        emitted_any = False
+                        for chunk in stream:
+                            if chunk.choices and len(chunk.choices) > 0:
+                                delta = getattr(chunk.choices[0].delta, "content", "") or ""
+                                if delta:
+                                    emitted_any = True
+                                    yield delta
+                        if emitted_any:
+                            return
+                    except Exception as inner_e:
+                        print(f"[ARIA Groq Stream Notice] Model '{model_candidate}' failed: {inner_e}", file=sys.stderr)
+                        continue
+            except Exception as e:
+                print(f"[ARIA Groq Stream Warning] Streaming failed: {e}", file=sys.stderr)
+
+        # 2. OpenAI Provider (Alternative)
+        if self.provider == "openai" and self.openai_key and not self.openai_key.startswith("your_"):
+            try:
+                import openai
+                client = openai.OpenAI(api_key=self.openai_key, max_retries=0)
+                ctx_block = "\n---\n".join(context_chunks) if context_chunks else "No specific notes provided."
+                sys_msg = (
+                    f"You are ARIA, an expert study assistant. Answer strictly grounded in the provided notes. "
+                    f"Language: {language}. Always cite source chunks when available."
+                )
+                stream = client.chat.completions.create(
+                    model=self.openai_model,
+                    messages=[
+                        {"role": "system", "content": sys_msg},
+                        {"role": "user", "content": f"Context Notes:\n{ctx_block}\n\nQuestion/Task:\n{prompt}"}
+                    ],
+                    temperature=temperature,
+                    max_tokens=800,
+                    stream=True
+                )
+                for chunk in stream:
+                    if chunk.choices and len(chunk.choices) > 0:
+                        delta = getattr(chunk.choices[0].delta, "content", "") or ""
+                        if delta:
+                            yield delta
+                return
+            except Exception:
+                pass
+
+        # 3. Grounded Heuristic Fallback (streamed in word/phrase tokens)
+        fallback_text, _ = self.generate_response(
+            prompt=prompt,
+            context_chunks=context_chunks,
+            language=language,
+            temperature=temperature,
+            system_instruction=system_instruction
+        )
+        words = re.split(r'(\s+)', fallback_text)
+        for w in words:
+            if w:
+                time.sleep(0.015)
+                yield w
 
 
 # ==============================================================================
@@ -532,7 +758,7 @@ class ActionSummary:
     status: str
     summary: str
     latency_ms: float = 0.0
-    executed_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    executed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -566,7 +792,7 @@ class AgentResponse:
     sources: List[Dict[str, Any]] = field(default_factory=list)
     structured_data: Optional[Dict[str, Any]] = None
     latency_profile: Optional[LatencyProfile] = None
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -883,18 +1109,18 @@ class CommunicationAgent:
     def detect_language(self, text: str) -> str:
         """Identifies language of the query (Dimension 1: Language)."""
         lower = text.lower()
-        if any(w in lower for w in ["aur", "ka", "ke", "karo", "hai", "batao", "kya", "samjhao"]):
+        if re.search(r'\b(aur|ka|ke|karo|karein|hai|hain|batao|kya|samjhao|padhna|padhao)\b', lower):
             return "hi-en"
-        if any(w in lower for w in ["explica", "memoria", "preguntas", "cuál", "diferencia"]):
+        if re.search(r'\b(explica|memoria|preguntas|cuál|diferencia|hola|qué|que)\b', lower):
             return "es"
-        if any(w in lower for w in ["expliquez", "processus", "mémoire", "qu'est-ce"]):
+        if re.search(r'\b(expliquez|processus|mémoire|qu\'est-ce|bonjour|comment)\b', lower):
             return "fr"
         return "en"
 
     def detect_intent(self, message: str) -> StudyIntent:
         """Determines pedagogical intent from student input."""
         m_lower = message.lower().strip()
-        if any(p in m_lower for p in ["flowchart", "flow chart", "flow", "workflow", "diagram", "what happens when", "architecture flow", "mermaid"]):
+        if any(p in m_lower for p in ["flowchart", "flow chart", "workflow", "diagram", "what happens when", "architecture flow", "mermaid"]):
             return StudyIntent.GENERATE_FLOWCHART
         if any(p in m_lower for p in ["full session", "full revision", "mastery session", "everything on", "prepare me for"]):
             return StudyIntent.FULL_REVISION_WORKFLOW
@@ -902,9 +1128,9 @@ class CommunicationAgent:
             return StudyIntent.GENERATE_FLASHCARDS
         if any(p in m_lower for p in ["quiz", "test me", "practice question", "questions", "mcq", "multiple choice"]):
             return StudyIntent.GENERATE_QUIZ
-        if any(p in m_lower for p in ["plan", "schedule", "explain", "how does", "what is", "break down", "difference between"]):
+        if any(p in m_lower for p in ["plan", "schedule", "explain", "how does", "what is", "break down", "difference between", "summarize", "summary", "overview"]):
             return StudyIntent.EXPLAIN_AND_PLAN
-        if any(p in m_lower for p in ["hi", "hello", "hey", "what can you do", "who are you", "help"]):
+        if re.search(r'\b(hi|hello|hey|greetings|hola|bonjour|namaste)\b', m_lower) or any(p in m_lower for p in ["what can you do", "who are you", "how can you help", "help me get started"]):
             return StudyIntent.CONVERSATIONAL_GUIDE
         return StudyIntent.EXPLAIN_AND_PLAN
 
@@ -924,16 +1150,43 @@ class CommunicationAgent:
         on_token: Optional[Callable[[str], None]] = None,
     ) -> AgentResponse:
         """
-        Executes an end-to-end student turn:
-        1. Measures latency across all stages.
-        2. Detects language and intent.
-        3. Performs RAG retrieval if no external chunks provided.
-        4. Invokes MCP server tools.
-        5. Validates logic and produces grounded response.
+        Executes an end-to-end student turn through the 4 defense-in-depth guardrail layers:
+        1. Layer 1 (Input Guard): Length capping, control char stripping, prompt injection / leak refusal.
+        2. Layer 2 (User Isolation & Retrieval Gate): Owner is verified Clerk user_id. RAG_MIN_SCORE filtering.
+        3. Layer 3 (System Prompt & Context): build_context untrusted data labeling and XML tag defanging.
+        4. Layer 4 (Output Guard & Audit Log): Citation validation, non-existent source correction, and decision logging.
         """
         t_start = time.perf_counter()
-        language = self.detect_language(message)
-        intent = self.detect_intent(message)
+
+        # ----------------------------------------------------------------------
+        # Layer 1: Input Guard
+        # ----------------------------------------------------------------------
+        val_res = InputGuard.validate(message, authenticated_user_id=user_id)
+        if not val_res.is_valid:
+            total_turn_ms = (time.perf_counter() - t_start) * 1000.0
+            decision_logger.log(
+                user_id=user_id,
+                path=val_res.path,
+                chunk_count=0,
+                top_score=None,
+                status=val_res.status,
+                decision_reason=val_res.refusal_reason or "validation_failure"
+            )
+            return AgentResponse(
+                thread_id=thread_id,
+                user_id=user_id,
+                content=val_res.error_message or VALIDATION_ERROR_EMPTY,
+                intent="guardrail_refusal",
+                language="en",
+                actions=[],
+                sources=[],
+                structured_data=None,
+                latency_profile=LatencyProfile(0.0, 0.0, 0.0, round(total_turn_ms, 2), True)
+            )
+
+        sanitized_message = val_res.sanitized_query
+        language = self.detect_language(sanitized_message)
+        intent = self.detect_intent(sanitized_message)
         actions: List[ActionSummary] = []
         sources: List[Dict[str, Any]] = []
 
@@ -941,46 +1194,53 @@ class CommunicationAgent:
         tool_execution_ms = 0.0
         llm_ms = 0.0
 
-        # RAG Retrieval: if no explicit chunks are supplied, search the indexed notes
-        raw_text_chunks: List[str] = []
-        if context_chunks:
-            for idx, c in enumerate(context_chunks[:4]):
-                if isinstance(c, dict):
-                    raw_text_chunks.append(c.get("text", ""))
-                    sources.append({
-                        "document_id": c.get("document_id", f"doc-{idx+1}"),
-                        "title": c.get("title", "Study Notes"),
-                        "chunk_id": c.get("chunk_id", f"chunk-{idx+1}"),
-                        "excerpt": str(c.get("text", ""))[:120] + "...",
-                        "page": c.get("page")
-                    })
-                elif hasattr(c, "text"):
-                    raw_text_chunks.append(c.text)
-                    sources.append({
-                        "document_id": getattr(c, "document_id", f"doc-{idx+1}"),
-                        "title": getattr(c, "title", "Study Notes"),
-                        "chunk_id": getattr(c, "chunk_id", f"chunk-{idx+1}"),
-                        "section": getattr(c, "section", "General"),
-                        "excerpt": str(c.text)[:120] + "...",
-                        "page": getattr(c, "page", None),
-                    })
-                elif isinstance(c, str):
-                    raw_text_chunks.append(c)
+        # ----------------------------------------------------------------------
+        # Layer 2: Retrieval & Retrieval Gate
+        # ----------------------------------------------------------------------
+        if context_chunks is not None:
+            cand_chunks = context_chunks
+            cand_scores = context_scores if context_scores is not None else [1.0] * len(cand_chunks)
         else:
-            # Automatic RAG Retrieval
-            matched_chunks, scores, retrieval_ms = self.rag.search(message, top_k=RAG_TOP_K)
-            for chk in matched_chunks:
-                raw_text_chunks.append(chk.text)
-                sources.append({
-                    "document_id": chk.document_id,
-                    "title": chk.title,
-                    "chunk_id": chk.chunk_id,
-                    "section": chk.section,
-                    "excerpt": chk.text[:140] + "..."
-                })
+            cand_chunks, cand_scores, retrieval_ms = self.rag.search(sanitized_message, top_k=DEFAULT_TOP_K)
 
-        if not raw_text_chunks:
-            raw_text_chunks = [message]
+        gate_res = RetrievalGate.evaluate(cand_chunks, cand_scores, min_score=RAG_MIN_SCORE)
+
+        # No-context path: honest refusal, 0 sources, NO model call
+        if gate_res.path == DecisionPath.NO_CONTEXT and intent != StudyIntent.CONVERSATIONAL_GUIDE:
+            total_turn_ms = (time.perf_counter() - t_start) * 1000.0
+            decision_logger.log(
+                user_id=user_id,
+                path=DecisionPath.NO_CONTEXT,
+                chunk_count=0,
+                top_score=gate_res.top_score,
+                status="success",
+                decision_reason=gate_res.decision_reason
+            )
+            return AgentResponse(
+                thread_id=thread_id,
+                user_id=user_id,
+                content=NO_CONTEXT_MESSAGE,
+                intent=intent.value,
+                language=language,
+                actions=[],
+                sources=[],
+                structured_data=None,
+                latency_profile=LatencyProfile(round(retrieval_ms, 2), 0.0, 0.0, round(total_turn_ms, 2), True)
+            )
+
+        # Grounded path: build context with untrusted data notices and defanged XML tags
+        context_block, included_sources = build_context(gate_res.filtered_chunks, gate_res.filtered_scores)
+        raw_text_chunks = [context_block] if context_block else [sanitized_message]
+        sources = included_sources
+
+        # Clean plain-text chunks for deterministic tools (flowcharts, flashcards, quiz, planner)
+        clean_tool_chunks: List[str] = []
+        for c in gate_res.filtered_chunks:
+            txt = getattr(c, "text", c.get("text", str(c)) if isinstance(c, dict) else str(c))
+            if txt:
+                clean_tool_chunks.append(str(txt).strip())
+        if not clean_tool_chunks:
+            clean_tool_chunks = [sanitized_message]
 
         # ----------------------------------------------------------------------
         # 1. Intent: Explain & Plan
@@ -1030,6 +1290,15 @@ class CommunicationAgent:
                 llm_communication_ms=round(llm_ms, 2),
                 total_agent_turn_ms=round(total_turn_ms, 2),
                 sla_met=total_turn_ms <= MAX_LATENCY_MS
+            )
+
+            decision_logger.log(
+                user_id=user_id,
+                path=DecisionPath.GROUNDED,
+                chunk_count=gate_res.chunk_count,
+                top_score=gate_res.top_score,
+                status="success",
+                decision_reason=gate_res.decision_reason
             )
 
             return AgentResponse(
@@ -1283,18 +1552,478 @@ class CommunicationAgent:
         # 5. Intent: Conversational Guide
         # ----------------------------------------------------------------------
         else:
+            if not included_sources or gate_res.path == DecisionPath.NO_CONTEXT:
+                if language == "hi-en":
+                    welcome_text = (
+                        "Namaste! Main ARIA hoon, aapka AI Revision Assistant. "
+                        "Aap mujhse apne uploaded notes ke bare mein sawal pooch sakte hain, "
+                        "flowcharts dekh sakte hain, ya flashcards aur quiz generate karwa sakte hain. "
+                        "Aaj hum kya revise karein?"
+                    )
+                elif language == "es":
+                    welcome_text = (
+                        "¡Hola! Soy ARIA, tu asistente inteligente de estudio y repaso. "
+                        "Puedo ayudarte a repasar tus documentos, generar diagramas conceptuales, "
+                        "crear fichas de estudio y cuestionarios. ¿En qué tema te gustaría enfocarte hoy?"
+                    )
+                elif language == "fr":
+                    welcome_text = (
+                        "Bonjour ! Je suis ARIA, votre tuteur de révision intelligent. "
+                        "Je peux vous aider à comprendre vos documents de cours, générer des schémas, "
+                        "des fiches de révision et des quiz. Que souhaitez-vous réviser aujourd'hui ?"
+                    )
+                else:
+                    welcome_text = (
+                        "Hello! I'm ARIA, your AI Revision & Intelligent Assistance study companion. "
+                        "I'm here to help you understand and master your coursework.\n\n"
+                        "Here is what I can do for you:\n"
+                        "- 📖 **Answer Questions**: Ask anything about your uploaded course notes or papers.\n"
+                        "- 🗺️ **Visual Flowcharts**: Ask for a flowchart to visualize processes or architectures.\n"
+                        "- 📋 **Study Plans**: Request a structured revision plan on any topic.\n"
+                        "- 🗂️ **Flashcards**: Generate active-recall flashcard decks.\n"
+                        "- ❓ **Practice Quizzes**: Test yourself with multiple-choice questions.\n\n"
+                        "Upload your notes or ask a question about your study materials to get started!"
+                    )
+                total_turn_ms = (time.perf_counter() - t_start) * 1000.0
+                profile = LatencyProfile(round(retrieval_ms, 2), 0.0, 0.0, round(total_turn_ms, 2), True)
+                decision_logger.log(
+                    user_id=user_id,
+                    path=DecisionPath.NO_CONTEXT,
+                    chunk_count=0,
+                    top_score=gate_res.top_score,
+                    status="success",
+                    decision_reason="conversational_guide_greeting"
+                )
+                return AgentResponse(
+                    thread_id=thread_id,
+                    user_id=user_id,
+                    content=welcome_text,
+                    intent=StudyIntent.CONVERSATIONAL_GUIDE.value,
+                    language=language,
+                    actions=actions,
+                    sources=[],
+                    latency_profile=profile
+                )
+
+            raw_llm_text, llm_ms = self.llm.generate_response(
+                sanitized_message,
+                raw_text_chunks,
+                language=language,
+                system_instruction=GUARDRAIL_SYSTEM_PROMPT
+            )
+            guarded_res = OutputGuard.guard(raw_llm_text, included_sources, path=gate_res.path)
             total_turn_ms = (time.perf_counter() - t_start) * 1000.0
-            profile = LatencyProfile(0.0, 0.0, 0.0, round(total_turn_ms, 2), True)
+            profile = LatencyProfile(0.0, 0.0, round(llm_ms, 2), round(total_turn_ms, 2), True)
+
+            decision_logger.log(
+                user_id=user_id,
+                path=DecisionPath.GROUNDED,
+                chunk_count=gate_res.chunk_count,
+                top_score=gate_res.top_score,
+                status="success",
+                decision_reason=gate_res.decision_reason
+            )
+
             return AgentResponse(
                 thread_id=thread_id,
                 user_id=user_id,
-                content="Hello! I'm ARIA, your AI Study Companion. Ask me for concept explanations, revision plans, flashcards, or practice quizzes!",
+                content=guarded_res.content,
                 intent=StudyIntent.CONVERSATIONAL_GUIDE.value,
                 language=language,
                 actions=actions,
-                sources=sources,
+                sources=guarded_res.sources,
                 latency_profile=profile
             )
+
+    def handle_message_stream(
+        self,
+        message: str,
+        user_id: str = "student-1",
+        thread_id: str = "thread-1",
+        context_chunks: Optional[List[Union[str, Dict[str, Any]]]] = None,
+        user_preferences: Optional[Dict[str, Any]] = None,
+        context_scores: Optional[List[float]] = None,
+    ) -> Iterator[Dict[str, Any]]:
+        """
+        Executes an end-to-end student turn yielding Server-Sent Events (SSE) events:
+        1. Layer 1: Input Guard validation.
+        2. Layer 2: Retrieval Gate check. If below RAG_MIN_SCORE, yields honest refusal with 0 sources.
+        3. Layer 3: Context building with untrusted data notices.
+        4. Layer 4: Streams tokens and logs security decision.
+        """
+        t_start = time.perf_counter()
+
+        # ----------------------------------------------------------------------
+        # Layer 1: Input Guard
+        # ----------------------------------------------------------------------
+        val_res = InputGuard.validate(message, authenticated_user_id=user_id)
+        if not val_res.is_valid:
+            total_turn_ms = (time.perf_counter() - t_start) * 1000.0
+            decision_logger.log(
+                user_id=user_id,
+                path=val_res.path,
+                chunk_count=0,
+                top_score=None,
+                status=val_res.status,
+                decision_reason=val_res.refusal_reason or "validation_failure"
+            )
+            yield {
+                "type": "metadata",
+                "thread_id": thread_id,
+                "user_id": user_id,
+                "intent": "guardrail_refusal",
+                "language": "en",
+                "sources": []
+            }
+            yield {"type": "token", "content": val_res.error_message or VALIDATION_ERROR_EMPTY}
+            yield {
+                "type": "complete",
+                "latency_profile": {
+                    "retrieval_ms": 0.0,
+                    "tool_execution_ms": 0.0,
+                    "llm_communication_ms": 0.0,
+                    "total_agent_turn_ms": round(total_turn_ms, 2),
+                    "sla_met": True
+                }
+            }
+            return
+
+        sanitized_message = val_res.sanitized_query
+        language = self.detect_language(sanitized_message)
+        intent = self.detect_intent(sanitized_message)
+        actions: List[ActionSummary] = []
+        sources: List[Dict[str, Any]] = []
+
+        retrieval_ms = 0.0
+        tool_execution_ms = 0.0
+        llm_ms = 0.0
+
+        # ----------------------------------------------------------------------
+        # Layer 2: Retrieval & Retrieval Gate
+        # ----------------------------------------------------------------------
+        if context_chunks is not None:
+            cand_chunks = context_chunks
+            cand_scores = context_scores if context_scores is not None else [1.0] * len(cand_chunks)
+        else:
+            cand_chunks, cand_scores, retrieval_ms = self.rag.search(sanitized_message, top_k=DEFAULT_TOP_K)
+
+        gate_res = RetrievalGate.evaluate(cand_chunks, cand_scores, min_score=RAG_MIN_SCORE)
+
+        # No-context path: honest refusal, 0 sources, NO model call
+        if gate_res.path == DecisionPath.NO_CONTEXT and intent != StudyIntent.CONVERSATIONAL_GUIDE:
+            total_turn_ms = (time.perf_counter() - t_start) * 1000.0
+            decision_logger.log(
+                user_id=user_id,
+                path=DecisionPath.NO_CONTEXT,
+                chunk_count=0,
+                top_score=gate_res.top_score,
+                status="success",
+                decision_reason=gate_res.decision_reason
+            )
+            yield {
+                "type": "metadata",
+                "thread_id": thread_id,
+                "user_id": user_id,
+                "intent": intent.value,
+                "language": language,
+                "sources": []
+            }
+            yield {"type": "token", "content": NO_CONTEXT_MESSAGE}
+            yield {
+                "type": "complete",
+                "latency_profile": {
+                    "retrieval_ms": round(retrieval_ms, 2),
+                    "tool_execution_ms": 0.0,
+                    "llm_communication_ms": 0.0,
+                    "total_agent_turn_ms": round(total_turn_ms, 2),
+                    "sla_met": True
+                }
+            }
+            return
+
+        # Grounded path: build safe context block with untrusted data notices
+        context_block, included_sources = build_context(gate_res.filtered_chunks, gate_res.filtered_scores)
+        raw_text_chunks = [context_block] if context_block else [sanitized_message]
+        sources = included_sources
+
+        # Clean plain-text chunks for deterministic tools (flowcharts, flashcards, quiz, planner)
+        clean_tool_chunks: List[str] = []
+        for c in gate_res.filtered_chunks:
+            txt = getattr(c, "text", c.get("text", str(c)) if isinstance(c, dict) else str(c))
+            if txt:
+                clean_tool_chunks.append(str(txt).strip())
+        if not clean_tool_chunks:
+            clean_tool_chunks = [sanitized_message]
+
+        # 1. Emit metadata event
+        yield {
+            "type": "metadata",
+            "thread_id": thread_id,
+            "user_id": user_id,
+            "intent": intent.value,
+            "language": language,
+            "sources": sources,
+        }
+
+        # 2. Dispatch by intent
+        if intent == StudyIntent.EXPLAIN_AND_PLAN:
+            tone = user_preferences.get("preferred_tone") if user_preferences else None
+            plan_res, tool_ms = self.mcp.call_planner(
+                query=sanitized_message,
+                tone=tone,
+                target_duration_minutes=45,
+                context_chunks=raw_text_chunks,
+                user_preferences=user_preferences,
+            )
+            tool_execution_ms += tool_ms
+            actions.append(ActionSummary(
+                tool="planner_tool",
+                status=plan_res.get("status", "success"),
+                summary=plan_res.get("agent_action_summary", "Plan generated."),
+                latency_ms=tool_ms
+            ))
+
+            study_plan = plan_res.get("study_plan", {})
+            valid_logic, issues = self.logic.validate_study_plan_logic(study_plan)
+
+            # Stream LLM explanation tokens using strict guardrail system prompt
+            t_llm_start = time.perf_counter()
+            for token in self.llm.stream_response(sanitized_message, raw_text_chunks, language=language, system_instruction=GUARDRAIL_SYSTEM_PROMPT):
+                yield {"type": "token", "content": token}
+            llm_ms = (time.perf_counter() - t_llm_start) * 1000.0
+
+            # Stream revision plan section
+            plan_lines = [
+                f"\n\n### 🗓️ Recommended Revision Plan ({study_plan.get('total_duration_minutes', 45)} mins)\n"
+            ]
+            for p in study_plan.get("phases", []):
+                plan_lines.append(f"- **Phase {p['phase_number']}: {p['title']}** ({p['duration_minutes']} min)\n")
+                plan_lines.append(f"  {p['description']}\n")
+                for item in p.get("action_items", []):
+                    plan_lines.append(f"  - [ ] {item}\n")
+
+            for pl in plan_lines:
+                yield {"type": "token", "content": pl}
+
+            yield {
+                "type": "structured_data",
+                "structured_data": {"study_plan": study_plan, "logic_valid": valid_logic},
+                "actions": [a.to_dict() for a in actions],
+            }
+
+        elif intent == StudyIntent.GENERATE_FLASHCARDS:
+            card_count = self._extract_count(message, default=5)
+            fc_res, tool_ms = self.mcp.call_flashcards(
+                chunks=raw_text_chunks,
+                count=card_count,
+            )
+            tool_execution_ms += tool_ms
+            actions.append(ActionSummary(
+                tool="flashcard_generator",
+                status=fc_res.get("status", "success"),
+                summary=fc_res.get("agent_summary", f"{card_count} flashcards generated."),
+                latency_ms=tool_ms
+            ))
+
+            cards = fc_res.get("flashcards", [])
+            valid_logic, issues = self.logic.validate_flashcard_logic(cards)
+
+            intro = f"I've generated **{len(cards)} active-recall flashcard(s)** from your study material:\n\n### 🗂️ Flashcard Deck\n"
+            yield {"type": "token", "content": intro}
+            for idx, c in enumerate(cards, 1):
+                card_text = f"\n#### Card {idx}: {c.get('topic', 'Concept')} `[{c.get('difficulty', 'medium').upper()}]`\n**Front:** {c.get('front', '')}\n**Back:**\n{c.get('back', '')}\n"
+                yield {"type": "token", "content": card_text}
+
+            yield {
+                "type": "structured_data",
+                "structured_data": {"flashcards": cards, "logic_valid": valid_logic},
+                "actions": [a.to_dict() for a in actions],
+            }
+
+        elif intent == StudyIntent.GENERATE_QUIZ:
+            q_count = self._extract_count(message, default=5)
+            quiz_res, tool_ms = self.mcp.call_quiz(
+                chunks=raw_text_chunks,
+                num_questions=q_count,
+                randomize_topics=True,
+            )
+            tool_execution_ms += tool_ms
+            actions.append(ActionSummary(
+                tool="question_generator",
+                status=quiz_res.get("status", "success"),
+                summary=quiz_res.get("agent_summary", f"{q_count} quiz questions created."),
+                latency_ms=tool_ms
+            ))
+
+            questions = quiz_res.get("questions", [])
+            valid_logic, issues = self.logic.validate_quiz_logic(questions)
+
+            intro = f"Here is your **{len(questions)}-question practice quiz** formatted for frontend and self-study:\n\n"
+            yield {"type": "token", "content": intro}
+            for q in questions:
+                q_text = f"### Q{q.get('id', 1)}: {q.get('question', '')}\n"
+                for opt_idx, opt in enumerate(q.get("options", [])):
+                    q_text += f"- **{chr(65+opt_idx)})** {opt}\n"
+                q_text += f"\n*Explanation:* {q.get('explanation', '')}\n\n"
+                yield {"type": "token", "content": q_text}
+
+            yield {
+                "type": "structured_data",
+                "structured_data": {"questions": questions, "logic_valid": valid_logic},
+                "actions": [a.to_dict() for a in actions],
+            }
+
+        elif intent == StudyIntent.GENERATE_FLOWCHART:
+            fc_res, tool_ms = self.mcp.call_flowchart(
+                topic=message,
+                context_chunks=raw_text_chunks,
+                orientation="TD",
+                detail_level="detailed",
+            )
+            tool_execution_ms += tool_ms
+            actions.append(ActionSummary(
+                tool="flowchart_generator",
+                status=fc_res.get("status", "success"),
+                summary=fc_res.get("agent_summary", "Flowchart generated."),
+                latency_ms=tool_ms
+            ))
+
+            title = fc_res.get("title", "Process Workflow")
+            mermaid_code = fc_res.get("mermaid_markdown", "")
+            steps = fc_res.get("steps_walkthrough", [])
+            components = fc_res.get("components", [])
+            decision_points = fc_res.get("decision_points", [])
+
+            intro = f"## 📊 {title}\n\n{mermaid_code}\n\n### 🔍 Step-by-Step Execution Walkthrough ('What Happens When'):\n\n"
+            yield {"type": "token", "content": intro}
+            for s in steps:
+                step_text = f"**Step {s.get('step')}: [{s.get('phase', 'Stage')}] — {s.get('component', '')}**\n{s.get('action', '')}\n\n"
+                yield {"type": "token", "content": step_text}
+
+            if components:
+                comp_text = "### ⚙️ Key Components & Responsibilities:\n"
+                for c in components:
+                    comp_text += f"- **{c.get('name')}** (`{c.get('role')}`): {c.get('details')}\n"
+                yield {"type": "token", "content": comp_text + "\n"}
+
+            if decision_points:
+                dp_text = "### ⚖️ Decision Branches:\n"
+                for d in decision_points:
+                    dp_text += f"- **Condition:** *\"{d.get('condition')}\"*\n  - ✅ **Yes:** {d.get('outcome_yes')}\n  - ❌ **No:** {d.get('outcome_no')}\n"
+                yield {"type": "token", "content": dp_text + "\n"}
+
+            valid_logic, issues = self.logic.validate_flowchart_logic(fc_res)
+            yield {
+                "type": "structured_data",
+                "structured_data": {"flowchart": fc_res, "logic_valid": valid_logic},
+                "actions": [a.to_dict() for a in actions],
+            }
+
+        elif intent == StudyIntent.FULL_REVISION_WORKFLOW:
+            chart_res, t0_fc = self.mcp.call_flowchart(message, context_chunks=raw_text_chunks)
+            p_res, t1 = self.mcp.call_planner(message, context_chunks=raw_text_chunks)
+            f_res, t2 = self.mcp.call_flashcards(raw_text_chunks, count=3)
+            q_res, t3 = self.mcp.call_quiz(raw_text_chunks, num_questions=3)
+            tool_execution_ms = t0_fc + t1 + t2 + t3
+
+            v_chart, _ = self.logic.validate_flowchart_logic(chart_res)
+            v_plan, _ = self.logic.validate_study_plan_logic(p_res.get("study_plan", {}))
+            v_fc, _ = self.logic.validate_flashcard_logic(f_res.get("flashcards", []))
+            v_quiz, _ = self.logic.validate_quiz_logic(q_res.get("questions", []))
+            all_valid = v_chart and v_plan and v_fc and v_quiz
+
+            actions.extend([
+                ActionSummary(tool="flowchart_generator", status="success", summary="Flowchart created", latency_ms=t0_fc),
+                ActionSummary(tool="planner_tool", status="success", summary="Plan created", latency_ms=t1),
+                ActionSummary(tool="flashcard_generator", status="success", summary="Flashcards created", latency_ms=t2),
+                ActionSummary(tool="question_generator", status="success", summary="Quiz created", latency_ms=t3),
+            ])
+
+            intro = (
+                f"## 🎓 Complete Study Session & Revision Architecture\n\n"
+                f"{p_res.get('direct_answer', '')}\n\n"
+                f"### 🗺️ Visual Architecture Flow\n\n"
+                f"{chart_res.get('mermaid_markdown', '')}\n\n"
+                f"### 📋 Session Breakdown:\n"
+                f"• **Visual Architecture Flow**: {chart_res.get('title')}\n"
+                f"• **Revision Plan**: {len(p_res.get('study_plan', {}).get('phases', []))} Phases ({p_res.get('study_plan', {}).get('total_duration_minutes', 45)} mins)\n"
+                f"• **Active-Recall Flashcards**: {len(f_res.get('flashcards', []))} Cards\n"
+                f"• **Practice Questions**: {len(q_res.get('questions', []))} MCQs\n"
+            )
+            yield {"type": "token", "content": intro}
+
+            yield {
+                "type": "structured_data",
+                "structured_data": {
+                    "flowchart": chart_res,
+                    "study_plan": p_res.get("study_plan"),
+                    "flashcards": f_res.get("flashcards"),
+                    "questions": q_res.get("questions"),
+                    "logic_valid": all_valid
+                },
+                "actions": [a.to_dict() for a in actions],
+            }
+
+        else:
+            if not included_sources or gate_res.path == DecisionPath.NO_CONTEXT:
+                if language == "hi-en":
+                    welcome_text = (
+                        "Namaste! Main ARIA hoon, aapka AI Revision Assistant. "
+                        "Aap mujhse apne uploaded notes ke bare mein sawal pooch sakte hain, "
+                        "flowcharts dekh sakte hain, ya flashcards aur quiz generate karwa sakte hain. "
+                        "Aaj hum kya revise karein?"
+                    )
+                elif language == "es":
+                    welcome_text = (
+                        "¡Hola! Soy ARIA, tu asistente inteligente de estudio y repaso. "
+                        "Puedo ayudarte a repasar tus documentos, generar diagramas conceptuales, "
+                        "crear fichas de estudio y cuestionarios. ¿En qué tema te gustaría enfocarte hoy?"
+                    )
+                elif language == "fr":
+                    welcome_text = (
+                        "Bonjour ! Je suis ARIA, votre tuteur de révision intelligent. "
+                        "Je peux vous aider à comprendre vos documents de cours, générer des schémas, "
+                        "des fiches de révision et des quiz. Que souhaitez-vous réviser aujourd'hui ?"
+                    )
+                else:
+                    welcome_text = (
+                        "Hello! I'm ARIA, your AI Revision & Intelligent Assistance study companion. "
+                        "I'm here to help you understand and master your coursework.\n\n"
+                        "Here is what I can do for you:\n"
+                        "- 📖 **Answer Questions**: Ask anything about your uploaded course notes or papers.\n"
+                        "- 🗺️ **Visual Flowcharts**: Ask for a flowchart to visualize processes or architectures.\n"
+                        "- 📋 **Study Plans**: Request a structured revision plan on any topic.\n"
+                        "- 🗂️ **Flashcards**: Generate active-recall flashcard decks.\n"
+                        "- ❓ **Practice Quizzes**: Test yourself with multiple-choice questions.\n\n"
+                        "Upload your notes or ask a question about your study materials to get started!"
+                    )
+                yield {"type": "token", "content": welcome_text}
+            else:
+                for token in self.llm.stream_response(sanitized_message, raw_text_chunks, language=language, system_instruction=GUARDRAIL_SYSTEM_PROMPT):
+                    yield {"type": "token", "content": token}
+
+        # 3. Complete event
+        total_turn_ms = (time.perf_counter() - t_start) * 1000.0
+        profile = LatencyProfile(
+            retrieval_ms=round(retrieval_ms, 2),
+            tool_execution_ms=round(tool_execution_ms, 2),
+            llm_communication_ms=round(llm_ms, 2),
+            total_agent_turn_ms=round(total_turn_ms, 2),
+            sla_met=total_turn_ms <= MAX_LATENCY_MS
+        )
+        yield {
+            "type": "complete",
+            "latency_profile": profile.to_dict(),
+        }
+
+        decision_logger.log(
+            user_id=user_id,
+            path=DecisionPath.GROUNDED if included_sources else DecisionPath.NO_CONTEXT,
+            chunk_count=gate_res.chunk_count,
+            top_score=gate_res.top_score,
+            status="success",
+            decision_reason=gate_res.decision_reason
+        )
 
 
 # ==============================================================================

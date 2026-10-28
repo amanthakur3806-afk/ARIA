@@ -134,6 +134,7 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
           message: text,
           user_id: userId,
           thread_id: sessionId,
+          stream: true,
         }),
       })
 
@@ -337,8 +338,27 @@ function MessageItem({ message }) {
 function MarkdownRenderer({ text, isStreaming = false }) {
   if (!text) return null
 
-  // Split into paragraphs
-  const paragraphs = text.split('\n\n')
+  // Tokenize blocks into code/mermaid fences and normal text to prevent breaking multiline diagrams
+  const blocks = []
+  const fenceRegex = /```(mermaid|[a-z0-9_-]*)[\r\n]([\s\S]*?)```/gi
+  let lastIndex = 0
+  let match
+
+  while ((match = fenceRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      blocks.push({ type: 'text', content: text.substring(lastIndex, match.index) })
+    }
+    const tag = (match[1] || '').toLowerCase().trim()
+    blocks.push({
+      type: tag === 'mermaid' ? 'mermaid' : 'code',
+      lang: tag,
+      content: match[2].trim()
+    })
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < text.length) {
+    blocks.push({ type: 'text', content: text.substring(lastIndex) })
+  }
 
   return (
     <div className={`markdown-body${isStreaming ? ' markdown-body--streaming' : ''}`}>
@@ -355,37 +375,45 @@ function MarkdownRenderer({ text, isStreaming = false }) {
           const mermaidCode = match ? match[1].trim() : trimmed.replace(/```mermaid/gi, '').replace(/```/g, '').trim()
           return <MermaidDiagram key={idx} code={mermaidCode} />
         }
-
-        // Generic code blocks
-        if (trimmed.startsWith('```')) {
-          const code = trimmed.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '')
+        if (block.type === 'code') {
           return (
-            <pre key={idx} className="code-block" style={{ padding: '10px 12px', background: '#1e1e1e', color: '#d4d4d4', borderRadius: '6px', overflowX: 'auto', fontSize: '12px' }}>
-              <code>{code}</code>
+            <pre key={bIdx} className="code-block" style={{ padding: '10px 12px', background: '#1e1e1e', color: '#d4d4d4', borderRadius: '6px', overflowX: 'auto', fontSize: '12px' }}>
+              <code>{block.content}</code>
             </pre>
           )
         }
 
-        if (trimmed.startsWith('## ')) {
-          return <h2 key={idx}>{trimmed.replace('## ', '')}</h2>
-        }
-        if (trimmed.startsWith('# ')) {
-          return <h1 key={idx}>{trimmed.replace('# ', '')}</h1>
-        }
+        // Render normal text block split into paragraphs
+        const paragraphs = block.content.split(/\r?\n\r?\n/)
+        return paragraphs.map((para, pIdx) => {
+          const trimmed = para.trim()
+          if (!trimmed) return null
+          const key = `${bIdx}_${pIdx}`
 
-        // Bullet lists
-        if (trimmed.includes('\n• ') || trimmed.includes('\n- ') || trimmed.startsWith('• ') || trimmed.startsWith('- ')) {
-          const items = trimmed.split(/\n[•-]\s*/).map((s) => s.replace(/^[•-]\s*/, ''))
-          return (
-            <ul key={idx}>
-              {items.map((item, i) => (
-                <li key={i} dangerouslySetInnerHTML={{ __html: formatInline(item) }} />
-              ))}
-            </ul>
-          )
-        }
+          if (trimmed.startsWith('### ')) {
+            return <h3 key={key}>{trimmed.replace('### ', '')}</h3>
+          }
+          if (trimmed.startsWith('## ')) {
+            return <h2 key={key}>{trimmed.replace('## ', '')}</h2>
+          }
+          if (trimmed.startsWith('# ')) {
+            return <h1 key={key}>{trimmed.replace('# ', '')}</h1>
+          }
 
-        return <p key={idx} dangerouslySetInnerHTML={{ __html: formatInline(trimmed) }} />
+          // Bullet lists
+          if (trimmed.includes('\n• ') || trimmed.includes('\n- ') || trimmed.startsWith('• ') || trimmed.startsWith('- ')) {
+            const items = trimmed.split(/\r?\n[•-]\s*/).map((s) => s.replace(/^[•-]\s*/, ''))
+            return (
+              <ul key={key}>
+                {items.map((item, i) => (
+                  <li key={i} dangerouslySetInnerHTML={{ __html: formatInline(item) }} />
+                ))}
+              </ul>
+            )
+          }
+
+          return <p key={key} dangerouslySetInnerHTML={{ __html: formatInline(trimmed) }} />
+        })
       })}
     </div>
   )

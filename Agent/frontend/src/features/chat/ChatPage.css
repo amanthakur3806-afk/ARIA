@@ -299,6 +299,11 @@
   gap: 4px;
 }
 
+.chat-thinking--inline {
+  padding: 6px 2px;
+  align-items: center;
+}
+
 .chat-thinking span {
   width: 6px;
   height: 6px;
@@ -995,5 +1000,26 @@
 
   .chat-page__composer {
     padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+}
+
+/* SSE Streaming Typing Cursor */
+.streaming-cursor {
+  display: inline-block;
+  margin-left: 3px;
+  color: var(--color-brand, #3b82f6);
+  font-weight: 900;
+  animation: sseCursorBlink 0.75s infinite ease-in-out;
+  vertical-align: baseline;
+}
+
+@keyframes sseCursorBlink {
+  0%, 100% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+  50% {
+    opacity: 0.15;
+    transform: scaleY(0.85);
   }
 }
