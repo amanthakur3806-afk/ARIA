@@ -45,9 +45,20 @@ UDP (User Datagram Protocol):
   }
 ]
 
+function readTextFile(file, onLoad, onError) {
+  const reader = new FileReader()
+  reader.onload = (event) => {
+    onLoad(typeof event.target?.result === 'string' ? event.target.result : '')
+  }
+  reader.onerror = onError
+  reader.readAsText(file)
+  return reader
+}
+
 export function RagKnowledgeModal({
   isOpen,
   onClose,
+  fileToIngest,
   userId = 'student-1',
   sessionId = 'thread-1',
   onUserChange,
@@ -71,6 +82,24 @@ export function RagKnowledgeModal({
   useEffect(() => {
     setSessionInput(sessionId)
   }, [sessionId])
+
+  useEffect(() => {
+    if (!isOpen || !fileToIngest) return undefined
+
+    setActiveTab('ingest')
+    setStatusMessage(null)
+    setSelectedFileName(fileToIngest.name)
+    setTitle((currentTitle) => currentTitle || fileToIngest.name.replace(/\.[^/.]+$/, ''))
+    const reader = readTextFile(
+      fileToIngest,
+      setText,
+      () => setStatusMessage({ type: 'error', text: `Could not read "${fileToIngest.name}".` }),
+    )
+
+    return () => {
+      if (reader.readyState === FileReader.LOADING) reader.abort()
+    }
+  }, [fileToIngest, isOpen])
 
   useEffect(() => {
     if (isOpen) {
@@ -113,15 +142,14 @@ export function RagKnowledgeModal({
   function handleFileUpload(e) {
     const file = e.target.files?.[0]
     if (!file) return
+    setStatusMessage(null)
     setSelectedFileName(file.name)
-    if (!title) {
-      setTitle(file.name.replace(/\.[^/.]+$/, ''))
-    }
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      setText(event.target.result || '')
-    }
-    reader.readAsText(file)
+    setTitle((currentTitle) => currentTitle || file.name.replace(/\.[^/.]+$/, ''))
+    readTextFile(
+      file,
+      setText,
+      () => setStatusMessage({ type: 'error', text: `Could not read "${file.name}".` }),
+    )
   }
 
   async function handleIngest(e) {
@@ -354,10 +382,13 @@ export function RagKnowledgeModal({
               {/* Prominent Ingest Button */}
               <button
                 type="submit"
-                className="submit-ingest-btn"
+                aria-busy={isSubmitting}
+                className={`submit-ingest-btn${isSubmitting ? ' submit-ingest-btn--loading' : ''}`}
                 disabled={isSubmitting || !text.trim()}
               >
-                {isSubmitting ? '⏳ Indexing into Database...' : '🚀 Ingest Chunks into Database'}
+                {isSubmitting && <span aria-hidden="true" className="submit-ingest-btn__spinner" />}
+                <span>{isSubmitting ? 'Indexing your notes...' : 'Ingest Chunks into Database'}</span>
+                {isSubmitting && <span aria-hidden="true" className="submit-ingest-btn__progress" />}
               </button>
             </form>
           )}

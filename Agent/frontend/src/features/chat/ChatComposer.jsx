@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Icon } from '../../components/ui/Icon'
 import './ChatComposer.css'
 
 export function ChatComposer({ onSend, onOpenIngest, isLoading = false, placeholder }) {
   const [text, setText] = useState('')
+  const fileInputRef = useRef(null)
 
   function handleSubmit(e) {
     if (e) e.preventDefault()
@@ -37,13 +38,27 @@ export function ChatComposer({ onSend, onOpenIngest, isLoading = false, placehol
           <div className="composer__left-actions">
             <button
               type="button"
-              className="composer__ingest-btn"
-              onClick={onOpenIngest}
-              title="Upload or Ingest Study Materials into Knowledge Base"
+              aria-label="Attach a study file"
+              className="composer__attach-btn"
+              disabled={isLoading}
+              onClick={() => fileInputRef.current?.click()}
+              title="Attach a study file"
             >
-              <span className="composer__ingest-icon">📥</span>
-              <span>Ingest Notes / File</span>
+              <Icon name="plus" size={18} />
+              <span>Add file</span>
             </button>
+            <input
+              ref={fileInputRef}
+              accept=".txt,.md,.json,.csv,.pdf"
+              aria-label="Choose a study file"
+              className="composer__file-input"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                if (file) onOpenIngest(file)
+                event.target.value = ''
+              }}
+              type="file"
+            />
             <span className="composer__hint">Powered by User-Scoped RAG & FastMCP</span>
           </div>
           <div className="composer__actions">

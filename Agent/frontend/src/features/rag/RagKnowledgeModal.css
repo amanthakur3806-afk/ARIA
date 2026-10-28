@@ -324,6 +324,8 @@
 }
 
 .submit-ingest-btn {
+  position: relative;
+  overflow: hidden;
   background: linear-gradient(135deg, #4f46e5, #7c3aed);
   border: none;
   color: #fff;
@@ -347,6 +349,54 @@
 .submit-ingest-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.submit-ingest-btn--loading:disabled {
+  opacity: 1;
+}
+
+.submit-ingest-btn__spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: ingest-spin 750ms linear infinite;
+}
+
+.submit-ingest-btn__progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.submit-ingest-btn__progress::after {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  background: #fff;
+  content: '';
+  animation: ingest-progress 1.2s ease-in-out infinite;
+}
+
+@keyframes ingest-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ingest-progress {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(300%);
+  }
 }
 
 /* Status Alert */

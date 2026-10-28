@@ -14,10 +14,21 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
   const [sessionId, setSessionId] = useState('thread-1')
   const [localIsOpen, setLocalIsOpen] = useState(false)
   const [chunkCount, setChunkCount] = useState(0)
+  const [fileToIngest, setFileToIngest] = useState(null)
   const messagesEndRef = useRef(null)
 
   const isModalOpen = propIsOpen !== undefined ? propIsOpen : localIsOpen
   const setModalOpen = propSetIsOpen || setLocalIsOpen
+
+  function handleOpenIngest(file) {
+    if (file) setFileToIngest(file)
+    setModalOpen(true)
+  }
+
+  function handleCloseIngest() {
+    setFileToIngest(null)
+    setModalOpen(false)
+  }
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -137,7 +148,7 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
         <div className="chat-page__welcome">
           <WelcomePanel
             onSelectSuggestion={handleSendMessage}
-            onOpenIngest={() => setModalOpen(true)}
+            onOpenIngest={() => handleOpenIngest()}
           />
         </div>
       ) : (
@@ -169,16 +180,17 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
         <ChatComposer
           isLoading={isLoading}
           onSend={handleSendMessage}
-          onOpenIngest={() => setModalOpen(true)}
+          onOpenIngest={handleOpenIngest}
         />
       </div>
 
       {/* RAG Knowledge Base Modal */}
       <RagKnowledgeModal
         isOpen={isModalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={handleCloseIngest}
         userId={userId}
         sessionId={sessionId}
+        fileToIngest={fileToIngest}
         onUserChange={(newUid) => {
           setUserId(newUid)
           updateChunkCount(newUid, sessionId)

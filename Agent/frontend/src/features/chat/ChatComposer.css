@@ -63,30 +63,36 @@
   gap: 12px;
 }
 
-.composer__ingest-btn {
+.composer__attach-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(79, 70, 229, 0.4);
-  background: linear-gradient(135deg, rgba(79, 70, 229, 0.15), rgba(124, 58, 237, 0.12));
-  color: #818cf8;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 150ms ease;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
 }
 
-.composer__ingest-btn:hover {
-  background: linear-gradient(135deg, rgba(79, 70, 229, 0.3), rgba(124, 58, 237, 0.25));
-  border-color: rgba(79, 70, 229, 0.6);
-  color: #fff;
-  transform: translateY(-1px);
+.composer__attach-btn:hover:not(:disabled) {
+  border-color: var(--color-green);
+  color: var(--color-green-dark);
+  background: var(--color-green-surface);
 }
 
-.composer__ingest-icon {
-  font-size: 13px;
+.composer__attach-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.composer__file-input {
+  display: none;
 }
 
 .composer__hint,
