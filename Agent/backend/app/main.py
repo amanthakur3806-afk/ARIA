@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -28,6 +29,7 @@ if str(CURRENT_DIR) not in sys.path:
 # Import Communication Agent and persistent RAG store
 from app.agent.communication_agent import CommunicationAgent
 from app.db.rag_store import rag_store
+from app.memory.persist import persist_turn
 
 # Initialize FastAPI App
 app = FastAPI(
@@ -95,6 +97,7 @@ def handle_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = 
     Processes user messages through the Communication Agent, scoped to the user and session RAG store.
     """
     resolved_thread_id = thread_id or payload.thread_id or "thread-1"
+    _t0 = time.perf_counter()
     user_id = payload.user_id or "student-1"
     message_text = payload.message.strip()
 
@@ -122,6 +125,8 @@ def handle_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = 
                     f"No study materials have been uploaded for session **{resolved_thread_id}** yet.\n\n"
                     f"Please upload a knowledge base or data file for this session using the **📥 Ingest Notes / Knowledge Base** button, or switch to an active session with materials."
                 )
+
+            persist_turn(user_id, message_text, default_reply, intent="no_data_prompt", language="en")
 
             return {
                 "thread_id": resolved_thread_id,
@@ -163,6 +168,14 @@ def handle_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = 
 
         user_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
         assistant_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
+
+        persist_turn(
+            user_id, message_text, response.content,
+            intent=response.intent, language=response.language,
+            sources=response.sources,
+            actions=[a.to_dict() for a in response.actions],
+            latency_ms=int((time.perf_counter() - _t0) * 1000),
+        )
 
         return {
             "thread_id": resolved_thread_id,
@@ -269,3 +282,4 @@ def delete_document(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
+
