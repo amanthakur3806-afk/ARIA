@@ -572,18 +572,16 @@ flowchart {orientation}
 
 # Functional helpers
 def execute_flowchart_tool(
-    topic: str = "",
+    topic: str,
     context_chunks: Optional[List[Union[str, Dict[str, Any]]]] = None,
     orientation: str = "TD",
     detail_level: str = "detailed",
-    llm_adapter: Optional[Callable[[str, Dict[str, Any]], str]] = None,
-    **kwargs
+    llm_adapter: Optional[Callable[[str, Dict[str, Any]], str]] = None
 ) -> Dict[str, Any]:
     """Convenience functional wrapper for executing the flowchart generator tool."""
-    effective_topic = topic or kwargs.get("query") or kwargs.get("title", "Workflow")
     tool = FlowchartGeneratorTool(llm_adapter=llm_adapter)
     return tool.run(
-        topic=effective_topic,
+        topic=topic,
         context_chunks=context_chunks,
         orientation=orientation,
         detail_level=detail_level

@@ -19,11 +19,11 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# Ensure project backend directory is in sys.path
+# Ensure project paths are in sys.path
 CURRENT_DIR = Path(__file__).resolve().parent
-BACKEND_DIR = CURRENT_DIR.parent.parent.parent
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
+BACKEND_APP_DIR = CURRENT_DIR.parent.parent
+if str(BACKEND_APP_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_APP_DIR))
 
 # Resolve FastMCP with support across MCP SDK v1, v2, and standalone fastmcp
 try:

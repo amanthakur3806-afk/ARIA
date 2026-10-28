@@ -523,25 +523,20 @@ class PlannerTool:
 
 # MCP Tool Execution Helper
 def execute_planner_tool(
-    query: str = "",
-    topic: Optional[str] = None,
+    query: str,
     tone: Optional[str] = None,
     context_chunks: Optional[List[str]] = None,
     target_duration_minutes: int = 45,
-    target_duration: Optional[int] = None,
     user_preferences: Optional[Dict[str, Any]] = None,
-    llm_adapter: Optional[Callable[[str, Dict[str, Any]], str]] = None,
-    **kwargs
+    llm_adapter: Optional[Callable[[str, Dict[str, Any]], str]] = None
 ) -> Dict[str, Any]:
     """Convenience functional wrapper for executing the planner tool."""
-    effective_query = query or topic or kwargs.get("prompt", "")
-    effective_duration = target_duration if target_duration is not None else target_duration_minutes
     tool = PlannerTool(llm_adapter=llm_adapter)
     return tool.run(
-        query=effective_query,
+        query=query,
         tone=tone,
         context_chunks=context_chunks,
-        target_duration_minutes=effective_duration,
+        target_duration_minutes=target_duration_minutes,
         user_preferences=user_preferences
     )
 

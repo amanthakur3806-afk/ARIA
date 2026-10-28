@@ -385,21 +385,12 @@ class QuestionGeneratorTool:
 
         try:
             raw = self.llm_adapter(prompt, {"temperature": 0.3})
-            json_match = re.search(r'\[\s*\{.*\}\s*\]', raw, re.DOTALL)
+            json_match = re.search(r'\[.*\]', raw, re.DOTALL)
             if json_match:
                 parsed = json.loads(json_match.group(0))
                 questions: List[QuizQuestion] = []
                 for idx, q in enumerate(parsed[:num_questions], 1):
-                    if not isinstance(q, dict):
-                        continue
                     opts = q.get("options", [])
-                    question_text = str(q.get("question", "")).strip()
-                    if not opts or len(opts) < 2 or not question_text:
-                        fact = sampled_facts[min(idx-1, len(sampled_facts)-1)]
-                        q_obj = self._generate_heuristic_question(fact, q_id=idx, all_facts=sampled_facts)
-                        questions.append(q_obj)
-                        continue
-
                     correct = q.get("correct_answer", opts[0] if opts else "")
                     correct_idx = q.get("correct_option_index")
                     if correct_idx is None or correct_idx >= len(opts):
@@ -408,7 +399,7 @@ class QuestionGeneratorTool:
                     questions.append(QuizQuestion(
                         id=idx,
                         topic=q.get("topic", "Academic Topic"),
-                        question=question_text,
+                        question=q.get("question", ""),
                         options=opts,
                         correct_answer=correct,
                         correct_option_index=correct_idx,
@@ -416,8 +407,7 @@ class QuestionGeneratorTool:
                         difficulty=q.get("difficulty", "medium"),
                         source_chunk_id=sampled_facts[min(idx-1, len(sampled_facts)-1)].get("chunk_id")
                     ))
-                if questions:
-                    return questions
+                return questions
         except Exception:
             return None
 
@@ -545,15 +535,13 @@ def execute_question_generator_tool(
     randomize_topics: bool = True,
     difficulty: str = "all",
     topic_focus: Optional[str] = None,
-    llm_adapter: Optional[Callable[[str, Dict[str, Any]], str]] = None,
-    **kwargs
+    llm_adapter: Optional[Callable[[str, Dict[str, Any]], str]] = None
 ) -> Dict[str, Any]:
     """Convenience functional wrapper for executing the question generator tool."""
-    effective_num = kwargs.get("count") or kwargs.get("target_count") or num_questions
     tool = QuestionGeneratorTool(llm_adapter=llm_adapter)
     return tool.run(
         chunks=chunks,
-        num_questions=effective_num,
+        num_questions=num_questions,
         randomize_topics=randomize_topics,
         difficulty=difficulty,
         topic_focus=topic_focus

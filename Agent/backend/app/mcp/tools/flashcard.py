@@ -393,35 +393,24 @@ class FlashcardGeneratorTool:
 
         try:
             raw = self.llm_adapter(prompt, {"temperature": 0.2})
-            json_match = re.search(r'\[\s*\{.*\}\s*\]', raw, re.DOTALL)
+            json_match = re.search(r'\[.*\]', raw, re.DOTALL)
             if json_match:
                 parsed = json.loads(json_match.group(0))
                 cards: List[Flashcard] = []
                 for idx, c in enumerate(parsed):
-                    if not isinstance(c, dict):
-                        continue
-                    cand = prompt_candidates[min(idx, len(prompt_candidates)-1)]
-                    front = str(c.get("front", "")).strip()
-                    back = str(c.get("back", "")).strip()
-                    if not front or not back or front.lower() == back.lower():
-                        polished = self._polish_card(cand, card_index=idx, target_format=target_format)
-                        front = front or polished.front
-                        back = back or polished.back
-                    topic = c.get("topic") or cand.get("term", "Concept")
-                    hash_id = hashlib.md5(f"llm_{topic}_{idx}".encode()).hexdigest()[:8]
+                    hash_id = hashlib.md5(f"llm_{c.get('topic')}_{idx}".encode()).hexdigest()[:8]
                     cards.append(Flashcard(
                         card_id=f"fc_{hash_id}",
-                        topic=topic,
-                        front=front,
-                        back=back,
+                        topic=c.get("topic", "Concept"),
+                        front=c.get("front", ""),
+                        back=c.get("back", ""),
                         difficulty=c.get("difficulty", "medium"),
                         format=c.get("format", target_format),
-                        key_points=c.get("key_points") or [f"Core: {back[:140]}"],
-                        source_chunks=cand.get("source_chunks", []),
-                        tags=[topic.lower()]
+                        key_points=c.get("key_points", []),
+                        source_chunks=prompt_candidates[min(idx, len(prompt_candidates)-1)].get("source_chunks", []),
+                        tags=[c.get("topic", "").lower()]
                     ))
-                if cards:
-                    return cards
+                return cards
         except Exception:
             return None
 
@@ -522,16 +511,14 @@ def execute_flashcard_tool(
     count: int = 5,
     difficulty: str = "all",
     card_format: str = "mixed",
-    llm_adapter: Optional[Callable[[str, Dict[str, Any]], str]] = None,
-    **kwargs
+    llm_adapter: Optional[Callable[[str, Dict[str, Any]], str]] = None
 ) -> Dict[str, Any]:
     """Convenience functional wrapper for executing the flashcard generator tool."""
-    effective_count = kwargs.get("num_cards") or kwargs.get("target_count") or count
     tool = FlashcardGeneratorTool(llm_adapter=llm_adapter)
     return tool.run(
         chunks=chunks,
         topic_filter=topic_filter,
-        count=effective_count,
+        count=count,
         difficulty=difficulty,
         card_format=card_format
     )

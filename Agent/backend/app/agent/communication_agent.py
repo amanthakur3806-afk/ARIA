@@ -67,13 +67,7 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 RAG_CHUNK_SIZE = int(os.getenv("RAG_CHUNK_SIZE", "350"))
 RAG_CHUNK_OVERLAP = int(os.getenv("RAG_CHUNK_OVERLAP", "60"))
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "3"))
-MAX_LATENCY_MS = float(os.getenv("MAX_ACCEPTABLE_LATENCY_MS", "4000.0"))
-
-# Ensure project backend directory is in sys.path
-CURRENT_DIR = Path(__file__).resolve().parent
-BACKEND_APP_DIR = CURRENT_DIR.parent.parent
-if str(BACKEND_APP_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_APP_DIR))
+MAX_LATENCY_MS = float(os.getenv("MAX_ACCEPTABLE_LATENCY_MS", "2000.0"))
 
 # Import FastMCP server and tool functions
 try:
@@ -389,10 +383,10 @@ class LLMCommunicator:
             try:
                 try:
                     from groq import Groq
-                    client = Groq(api_key=self.groq_key, max_retries=0)
+                    client = Groq(api_key=self.groq_key)
                 except ImportError:
                     import openai
-                    client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=self.groq_key, max_retries=0)
+                    client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=self.groq_key)
 
                 ctx_block = "\n---\n".join(context_chunks) if context_chunks else "General academic knowledge context."
                 default_sys = (
