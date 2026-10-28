@@ -5,7 +5,6 @@ import './Sidebar.css'
 const navItems = [
   { label: 'Study chat', icon: 'chat', active: true },
   { label: 'My library', icon: 'book' },
-  { label: 'Study tasks', icon: 'tasks' },
 ]
 
 export function Sidebar({ isOpen, onClose, onNewChat }) {
