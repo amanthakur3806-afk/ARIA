@@ -46,7 +46,7 @@ export function Sidebar({ isOpen, onClose, onNewChat, onOpenIngest }) {
           type="button"
         >
           <Icon name="book" size={18} />
-          <span>My library (Knowledge Base)</span>
+          <span>My library</span>
           <span className="nav-item__soon" style={{ background: '#6366f1', color: '#fff' }}>RAG</span>
         </button>
 
