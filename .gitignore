@@ -1,0 +1,105 @@
+# ==============================================================================
+# ARIA Root .gitignore
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Environment Variables & Secret Credentials (NEVER COMMIT)
+# ------------------------------------------------------------------------------
+.env
+.env.*
+*.env
+!.env.example
+*.key
+*.pem
+credentials.json
+
+# ------------------------------------------------------------------------------
+# 2. Python Virtual Environments & Packages
+# ------------------------------------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+**/venv/
+**/.venv/
+
+# ------------------------------------------------------------------------------
+# 3. Python Bytecode, Caches & Build Artifacts
+# ------------------------------------------------------------------------------
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing & Linting
+.pytest_cache/
+**/.pytest_cache/
+.mypy_cache/
+**/.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ------------------------------------------------------------------------------
+# 4. Node.js & Frontend Artifacts
+# ------------------------------------------------------------------------------
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+dist-ssr/
+**/dist-ssr/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ------------------------------------------------------------------------------
+# 5. Local Databases & Vector Stores
+# ------------------------------------------------------------------------------
+chroma_db/
+**/chroma_db/
+*.db
+*.sqlite
+*.sqlite3
+*.duckdb
+
+# ------------------------------------------------------------------------------
+# 6. Local User Notes & Generated Outputs
+# ------------------------------------------------------------------------------
+my_notes/*
+!my_notes/.gitkeep
+output/*
+!output/.gitkeep
+
+# ------------------------------------------------------------------------------
+# 7. Operating System & IDE Files
+# ------------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
