@@ -1,35 +1,35 @@
 .composer-wrap {
-  width: min(100%, 710px);
+  width: min(100%, 790px);
   margin: 0 auto;
-  padding: 0 18px;
+  padding: 0 22px;
 }
 
 .composer {
-  padding: 13px 14px 10px 16px;
+  padding: 17px 18px 13px 20px;
   border: 1px solid var(--color-border-strong);
-  border-radius: 11px;
+  border-radius: 15px;
   background: var(--color-surface);
-  box-shadow: 0 4px 14px rgb(28 48 32 / 4%);
+  box-shadow: 0 8px 26px rgb(34 42 34 / 5%);
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
 .composer:focus-within {
-  border-color: #b5cdb8;
-  box-shadow: 0 0 0 3px rgb(82 133 91 / 7%);
+  border-color: #b5c5ae;
+  box-shadow: 0 0 0 4px rgb(82 133 91 / 8%);
 }
 
 .composer textarea {
   display: block;
   width: 100%;
-  min-height: 37px;
+  min-height: 45px;
   max-height: 140px;
   resize: vertical;
-  padding: 2px 0 7px;
+  padding: 3px 0 10px;
   border: 0;
   outline: 0;
   color: var(--color-text-secondary);
   background: transparent;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.6;
 }
 
@@ -54,27 +54,27 @@
 }
 
 .composer__bottom {
-  min-height: 31px;
+  min-height: 34px;
   justify-content: space-between;
 }
 
 .composer__hint,
 .composer__shortcut {
   color: var(--color-text-muted);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .composer__actions {
-  gap: 13px;
+  gap: 15px;
 }
 
 .composer__send {
   display: grid;
-  width: 31px;
-  height: 31px;
+  width: 36px;
+  height: 36px;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   color: white;
   background: var(--color-green);
   cursor: pointer;
@@ -87,14 +87,14 @@
 }
 
 .composer__send:disabled {
-  color: #a3b3a5;
+  color: #849883;
   background: var(--color-green-surface);
   cursor: not-allowed;
 }
 
 .composer__spinner {
-  width: 13px;
-  height: 13px;
+  width: 15px;
+  height: 15px;
   border: 2px solid rgb(255 255 255 / 45%);
   border-top-color: white;
   border-radius: 50%;
@@ -102,16 +102,16 @@
 }
 
 .composer-wrap__disclaimer {
-  margin: 9px 0 0;
+  margin: 11px 0 0;
   color: var(--color-text-muted);
   text-align: center;
-  font-size: 9px;
+  font-size: 10px;
 }
 
 .composer-error {
-  margin: 0 0 9px;
+  margin: 0 0 10px;
   color: #a33c32;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 @keyframes spin {
@@ -122,11 +122,12 @@
 
 @media (max-width: 600px) {
   .composer-wrap {
-    padding: 0 12px;
+    padding: 0 13px;
   }
 
   .composer {
-    padding: 11px 11px 9px 13px;
+    padding: 13px 13px 10px 15px;
+    border-radius: 13px;
   }
 
   .composer__hint {
@@ -134,6 +135,6 @@
   }
 
   .composer__shortcut {
-    font-size: 8px;
+    font-size: 10px;
   }
 }
