@@ -7,7 +7,7 @@ export function Brand() {
       <span className="brand__mark">
         <Icon name="sparkle" size={21} strokeWidth={1.7} />
       </span>
-      <span className="brand__name">aria<span>.</span></span>
+      <span className="brand__name">ARIA<span></span></span>
     </div>
   )
 }
