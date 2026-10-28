@@ -2,10 +2,10 @@
   position: fixed;
   z-index: 10;
   display: flex;
-  width: 256px;
+  width: 276px;
   height: 100dvh;
   flex-direction: column;
-  padding: 25px 17px 14px;
+  padding: 28px 20px 18px;
   border-right: 1px solid var(--color-border);
   background: var(--color-surface);
 }
@@ -23,23 +23,24 @@
 
 .new-chat-button {
   display: flex;
-  height: 43px;
+  height: 48px;
   align-items: center;
-  gap: 10px;
-  margin-top: 35px;
-  padding: 0 11px;
+  gap: 11px;
+  margin-top: 37px;
+  padding: 0 13px;
   border: 1px solid var(--color-border-strong);
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--color-text-secondary);
   background: var(--color-surface);
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
-  transition: background 150ms ease, border-color 150ms ease;
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
 }
 
 .new-chat-button:hover {
-  border-color: var(--color-green);
+  transform: translateY(-1px);
+  border-color: #bac8b5;
   background: var(--color-green-surface);
 }
 
@@ -51,44 +52,50 @@
 }
 
 .sidebar__section-label {
-  margin: 31px 0 10px 9px;
+  margin: 35px 0 11px 9px;
   color: var(--color-text-muted);
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 1.05px;
+  letter-spacing: 1.15px;
   text-transform: uppercase;
 }
 
 .sidebar__nav {
   display: grid;
-  gap: 4px;
+  gap: 5px;
+}
+
+.nav-item {
+  display: flex;
+  width: 100%;
+  min-height: 43px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 500;
+  transition: color 150ms ease, background 150ms ease;
+}
+
+.nav-item:not(:disabled) {
+  cursor: pointer;
+}
+
+.nav-item:not(:disabled):hover {
+  background: var(--color-surface-raised);
 }
 
 .recent-chat-empty {
   margin: 0;
-  padding: 3px 10px;
+  padding: 5px 10px;
   color: var(--color-text-muted);
-  font-size: 10px;
-  line-height: 1.5;
-}
-
-.recent-chat {
-  display: flex;
-  width: 100%;
-  height: 39px;
-  align-items: center;
-  gap: 11px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 7px;
-  color: var(--color-text-secondary);
-  background: transparent;
-  text-align: left;
   font-size: 12px;
-}
-
-.nav-item {
-  cursor: pointer;
+  line-height: 1.6;
 }
 
 .nav-item:disabled {
@@ -99,28 +106,39 @@
 .nav-item--active {
   color: var(--color-green-dark);
   background: var(--color-green-surface);
-  font-weight: 600;
+  font-weight: 650;
 }
 
 .nav-item__soon {
   margin-left: auto;
   color: var(--color-text-muted);
   font-size: 10px;
+  font-weight: 500;
 }
 
 .sidebar__section-label--recent {
-  margin-top: 32px;
+  margin-top: 35px;
 }
 
 .recent-chat {
-  color: #737973;
+  display: flex;
+  width: 100%;
+  height: 42px;
+  align-items: center;
+  gap: 11px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  text-align: left;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .recent-chat:hover {
   color: var(--color-green-dark);
-  background: #f6f8f5;
+  background: var(--color-surface-raised);
 }
 
 .recent-chat span {
@@ -132,16 +150,16 @@
 .sidebar__footer {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   margin-top: auto;
-  padding: 13px 2px 3px;
+  padding: 17px 3px 4px;
   border-top: 1px solid var(--color-border);
 }
 
 .profile-avatar {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 38px;
+  height: 38px;
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid var(--color-border-strong);
@@ -149,36 +167,37 @@
   color: var(--color-green-dark);
   background: var(--color-green-surface);
   font-family: var(--font-heading);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
 }
 
 .sidebar__profile-copy {
   display: grid;
-  gap: 2px;
+  gap: 4px;
 }
 
 .sidebar__profile-name {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 }
 
 .sidebar__profile-plan {
   color: var(--color-text-muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .icon-button {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   flex: 0 0 auto;
   place-items: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: 9px;
   color: var(--color-text-secondary);
   background: transparent;
   cursor: pointer;
+  transition: background 150ms ease;
 }
 
 .icon-button:hover:not(:disabled) {
@@ -199,9 +218,9 @@
 @media (max-width: 760px) {
   .sidebar {
     z-index: 30;
-    width: min(290px, calc(100vw - 48px));
+    width: min(304px, calc(100vw - 48px));
     height: 100dvh;
-    padding: 20px 17px 14px;
+    padding: 22px 18px 16px;
     border-right: 1px solid var(--color-border);
     border-bottom: 0;
     transform: translateX(-105%);
