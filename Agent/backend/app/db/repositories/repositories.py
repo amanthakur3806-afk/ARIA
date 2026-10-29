@@ -26,18 +26,21 @@ class UserRepository(BaseRepository[User]):
 class ChatMessageRepository(BaseRepository[ChatMessage]):
     model = ChatMessage
 
-    def list_by_user(self, user_id: str, *, limit: int = 50) -> list[ChatMessage]:
-        """Oldest-first, last `limit` messages for the user."""
-        stmt = (
-            select(ChatMessage)
-            .where(ChatMessage.user_id == user_id)
-            .order_by(ChatMessage.created_at.desc())
-            .limit(limit)
-        )
+    def list_by_user(
+        self, user_id: str, *, session_id: str | None = None, limit: int = 50
+    ) -> list[ChatMessage]:
+        """Oldest-first, last `limit` messages for the user (optionally one session)."""
+        stmt = select(ChatMessage).where(ChatMessage.user_id == user_id)
+        if session_id is not None:
+            stmt = stmt.where(ChatMessage.session_id == session_id)
+        stmt = stmt.order_by(ChatMessage.created_at.desc()).limit(limit)
         return list(reversed(list(self.db.scalars(stmt))))
 
-    def delete_by_user(self, user_id: str) -> int:
-        rows = list(self.db.scalars(select(ChatMessage).where(ChatMessage.user_id == user_id)))
+    def delete_by_user(self, user_id: str, session_id: str | None = None) -> int:
+        stmt = select(ChatMessage).where(ChatMessage.user_id == user_id)
+        if session_id is not None:
+            stmt = stmt.where(ChatMessage.session_id == session_id)
+        rows = list(self.db.scalars(stmt))
         for row in rows:
             self.db.delete(row)
         self.db.commit()

@@ -22,6 +22,7 @@ class ChatMemory:
         role: str,
         content: str,
         *,
+        session_id: str | None = None,
         detected_language: str | None = None,
         intent: str | None = None,
         latency_ms: int | None = None,
@@ -32,6 +33,7 @@ class ChatMemory:
         tool_name, parameters, result_summary, execution_time_ms)."""
         msg = self.messages.create(
             user_id=user_id,
+            session_id=session_id,
             role=role,
             content=content,
             detected_language=detected_language,
@@ -43,13 +45,20 @@ class ChatMemory:
             self.tools.create(message_id=msg.id, **t)
         return msg
 
-    def recall(self, user_id: str, limit: int = 20) -> list[ChatMessage]:
-        return self.messages.list_by_user(user_id, limit=limit)
+    def recall(
+        self, user_id: str, limit: int = 20, session_id: str | None = None
+    ) -> list[ChatMessage]:
+        return self.messages.list_by_user(user_id, session_id=session_id, limit=limit)
 
-    def as_llm_messages(self, user_id: str, limit: int = 20) -> list[dict[str, str]]:
+    def as_llm_messages(
+        self, user_id: str, limit: int = 20, session_id: str | None = None
+    ) -> list[dict[str, str]]:
         """History in the {"role", "content"} shape most LLM APIs expect."""
-        return [{"role": m.role, "content": m.content} for m in self.recall(user_id, limit)]
+        return [
+            {"role": m.role, "content": m.content}
+            for m in self.recall(user_id, limit, session_id)
+        ]
 
-    def forget(self, user_id: str) -> int:
-        """Delete a user's stored conversation. Returns messages removed."""
-        return self.messages.delete_by_user(user_id)
+    def forget(self, user_id: str, session_id: str | None = None) -> int:
+        """Delete a user's stored conversation (or one session). Returns messages removed."""
+        return self.messages.delete_by_user(user_id, session_id)

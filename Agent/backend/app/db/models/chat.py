@@ -13,6 +13,7 @@ class ChatMessage(Base):
 
     id: Mapped[str] = uuid_pk()
     user_id: Mapped[str] = fk("users")
+    session_id: Mapped[str | None] = mapped_column(String(100))
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     detected_language: Mapped[str | None] = mapped_column(String(10))

@@ -7,19 +7,15 @@ FastMCP Study Tools, and the Persistent User-Scoped RAG Store.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import time
 import uuid
 from pathlib import Path
-from queue import Queue
-from threading import Thread
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 # Ensure project paths are in sys.path
@@ -30,23 +26,8 @@ if str(BACKEND_DIR) not in sys.path:
 if str(CURRENT_DIR) not in sys.path:
     sys.path.insert(0, str(CURRENT_DIR))
 
-# Import Communication Agent, persistent RAG store, and Guardrails
-from app.agent.communication_agent import CommunicationAgent, StudyIntent
-from app.agent.guardrails import (
-    ANSWER_POLICY_MODE,
-    CROSS_USER_REFUSAL_MESSAGE,
-    DEFAULT_TOP_K,
-    DecisionPath,
-    InputGuard,
-    NO_CONTEXT_MESSAGE,
-    OutputGuard,
-    RAG_MIN_SCORE,
-    RetrievalGate,
-    SECURITY_REFUSAL_MESSAGE,
-    VALIDATION_ERROR_EMPTY,
-    VALIDATION_ERROR_TOO_LONG,
-    decision_logger,
-)
+# Import Communication Agent and persistent RAG store
+from app.agent.communication_agent import CommunicationAgent
 from app.db.rag_store import rag_store
 from app.memory.persist import persist_turn
 
@@ -79,7 +60,6 @@ class ChatMessageRequest(BaseModel):
     thread_id: Optional[str] = Field("thread-1", description="Conversation thread / session identifier.")
     user_id: Optional[str] = Field("student-1", description="User identifier.")
     preferences: Optional[Dict[str, Any]] = Field(default_factory=dict, description="User learning preferences.")
-    stream: Optional[bool] = Field(False, description="Whether to stream response via SSE.")
 
 
 class DocumentIngestRequest(BaseModel):
@@ -97,35 +77,25 @@ class DocumentIngestRequest(BaseModel):
 @app.get("/api/health")
 def health_check():
     """Health status, LLM availability, and RAG database stats."""
-    model_name = getattr(agent.llm, "groq_model", None) or getattr(agent.llm, "openai_model", "aria-model")
+    model_name = agent.llm.groq_model if agent.llm.provider == "groq" else agent.llm.openai_model
     store_stats = rag_store.stats()
     return {
         "status": "ok",
         "service": "ARIA Backend",
-        "llm_provider": getattr(agent.llm, "provider", "groq"),
+        "llm_provider": agent.llm.provider,
         "llm_model": model_name,
-        "llm_api_active": agent.llm.is_api_active() if hasattr(agent.llm, "is_api_active") else True,
+        "llm_api_active": agent.llm.is_api_active(),
         "rag_store": store_stats,
     }
 
 
 @app.post("/api/v1/chat/threads/{thread_id}/messages")
 @app.post("/api/chat")
-def handle_chat_message(
-    payload: ChatMessageRequest,
-    thread_id: Optional[str] = None,
-    on_token: Optional[Callable[[str], None]] = None,
-):
+def handle_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = None):
     """
-    Primary chat endpoint with 4-layer guardrails:
-    1. Input Guard: control-character stripping, length capping, hostile injection / credential leak blocking.
-    2. User Isolation Gate: verified Clerk user ID enforcement (user ID is never taken from query).
-    3. Retrieval Gate: RAG_MIN_SCORE filtering deciding the path BEFORE any model call.
-    4. Output Guard: citation verification, source correction, and decision logging.
+    Primary chat endpoint:
+    Processes user messages through the Communication Agent, scoped to the user and session RAG store.
     """
-    if payload.stream:
-        return handle_chat_stream(payload=payload, thread_id=thread_id)
-
     resolved_thread_id = thread_id or payload.thread_id or "thread-1"
     _t0 = time.perf_counter()
     user_id = payload.user_id or "student-1"
@@ -156,20 +126,22 @@ def handle_chat_message(
                     f"Please upload a knowledge base or data file for this session using the **📥 Ingest Notes / Knowledge Base** button, or switch to an active session with materials."
                 )
 
-            persist_turn(user_id, message_text, default_reply, intent="no_data_prompt", language="en")
-            if on_token:
-                for offset in range(0, len(default_reply), 32):
-                    on_token(default_reply[offset:offset + 32])
+            persist_turn(user_id, message_text, default_reply, session_id=resolved_thread_id,
+                         intent="no_data_prompt", language="en")
 
             return {
                 "thread_id": resolved_thread_id,
                 "user_id": user_id,
-                "user_message": {"id": f"msg_{uuid.uuid4().hex[:8]}", "role": "user", "content": raw_message},
+                "user_message": {
+                    "id": user_msg_id,
+                    "role": "user",
+                    "content": message_text,
+                },
                 "assistant_message": {
-                    "id": f"msg_{uuid.uuid4().hex[:8]}",
+                    "id": assistant_msg_id,
                     "role": "assistant",
-                    "content": val_res.error_message or SECURITY_REFUSAL_MESSAGE,
-                    "intent": "security_refusal",
+                    "content": default_reply,
+                    "intent": "no_data_prompt",
                     "language": "en",
                     "sources": [],
                     "actions": [],
@@ -178,51 +150,29 @@ def handle_chat_message(
                 },
             }
 
-    message_text = val_res.sanitized_query
-
-    try:
-        user_total = rag_store.total_chunks(user_id=user_id)
-        session_total = rag_store.total_chunks(user_id=user_id, session_id=resolved_thread_id)
-
-        # Retrieve chunks strictly scoped to user and session
+        # Retrieve chunks specifically scoped to user_id and session_id (NO dummy fallback)
         matched_chunks, scores, ret_lat = rag_store.search(
             user_id=user_id,
             query=message_text,
-            top_k=DEFAULT_TOP_K,
+            top_k=4,
             session_id=resolved_thread_id,
             allow_curriculum_fallback=False,
         )
-
-        streamed_content: List[str] = []
-
-        def emit_token(token: str):
-            if on_token:
-                on_token(token)
-                streamed_content.append(token)
 
         response = agent.handle_message(
             message=message_text,
             user_id=user_id,
             thread_id=resolved_thread_id,
-            context_chunks=gate_res.filtered_chunks,
-            context_scores=gate_res.filtered_scores,
+            context_chunks=matched_chunks if matched_chunks else None,
             user_preferences=payload.preferences,
-            on_token=emit_token if on_token else None,
         )
-        if on_token:
-            emitted_text = "".join(streamed_content)
-            if response.content.startswith(emitted_text):
-                remaining_content = response.content[len(emitted_text):]
-            else:
-                remaining_content = response.content
-            for offset in range(0, len(remaining_content), 32):
-                on_token(remaining_content[offset:offset + 32])
 
         user_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
         assistant_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
 
         persist_turn(
             user_id, message_text, response.content,
+            session_id=resolved_thread_id,
             intent=response.intent, language=response.language,
             sources=response.sources,
             actions=[a.to_dict() for a in response.actions],
@@ -253,51 +203,6 @@ def handle_chat_message(
         raise HTTPException(status_code=500, detail=f"Agent execution error: {str(e)}")
 
 
-@app.post("/api/v1/chat/threads/{thread_id}/messages/stream")
-def stream_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = None):
-    """Streams generated chat text and sends response metadata when the turn completes."""
-    if not payload.message.strip():
-        raise HTTPException(status_code=400, detail="Message cannot be empty.")
-
-    events: Queue = Queue()
-
-    def generate_events():
-        def process_message():
-            try:
-                result = handle_chat_message(
-                    payload,
-                    thread_id,
-                    on_token=lambda content: events.put(("token", {"content": content})),
-                )
-                assistant_message = result["assistant_message"]
-                metadata = {key: value for key, value in assistant_message.items() if key != "content"}
-                events.put(("complete", {
-                    "thread_id": result["thread_id"],
-                    "user_id": result["user_id"],
-                    "assistant_message": metadata,
-                }))
-            except HTTPException as error:
-                events.put(("error", {"detail": error.detail}))
-            except Exception as error:
-                events.put(("error", {"detail": str(error)}))
-            finally:
-                events.put(("end", None))
-
-        Thread(target=process_message, daemon=True).start()
-        while True:
-            event_name, event_data = events.get()
-            if event_name == "end":
-                break
-            encoded_data = json.dumps(event_data, ensure_ascii=False)
-            yield f"event: {event_name}\ndata: {encoded_data}\n\n"
-
-    return StreamingResponse(
-        generate_events(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
 @app.post("/api/v1/documents/ingest")
 def ingest_document(payload: DocumentIngestRequest):
     """
@@ -306,16 +211,12 @@ def ingest_document(payload: DocumentIngestRequest):
     doc_id = payload.document_id or f"doc_{uuid.uuid4().hex[:8]}"
     user_id = payload.user_id or "student-1"
     session_id = payload.session_id or "thread-1"
-    title = (payload.title or "Uploaded Notes").replace("\x00", "").strip() or "Uploaded Notes"
-
-    clean_text = (payload.text or "").replace("\x00", "").strip()
-    if not clean_text:
-        raise HTTPException(status_code=400, detail="Document text cannot be empty.")
+    title = payload.title or "Uploaded Notes"
 
     chunk_count = rag_store.ingest(
         user_id=user_id,
         doc_id=doc_id,
-        text=clean_text,
+        text=payload.text,
         title=title,
         session_id=session_id,
     )
@@ -332,113 +233,6 @@ def ingest_document(payload: DocumentIngestRequest):
     }
 
 
-@app.post("/api/v1/documents/upload")
-def upload_document_file(
-    file: UploadFile = File(...),
-    user_id: str = Form("student-1"),
-    session_id: str = Form("thread-1"),
-    title: Optional[str] = Form(None),
-    document_id: Optional[str] = Form(None),
-):
-    """
-    Upload and parse study materials (.pdf, .txt, .md, .json, .csv).
-    Automatically extracts text (using pypdf for PDFs) and indexes chunks into RAG store.
-    """
-    if not file or not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided")
-
-    filename = file.filename
-    raw_user_id = user_id if isinstance(user_id, str) else "student-1"
-    raw_session_id = session_id if isinstance(session_id, str) else "thread-1"
-    raw_title = title if isinstance(title, str) else None
-    raw_doc_id = document_id if isinstance(document_id, str) else None
-
-    clean_title = (raw_title or "").replace("\x00", "").strip()
-    if not clean_title:
-        clean_title = Path(filename).stem or "Uploaded Document"
-
-    doc_id = raw_doc_id or f"doc_{uuid.uuid4().hex[:8]}"
-    resolved_user_id = raw_user_id
-    resolved_session_id = raw_session_id
-
-    try:
-        contents = file.file.read()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to read uploaded file: {str(e)}")
-
-    if not contents:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-
-    # 10MB limit check
-    if len(contents) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File exceeds 10MB limit. Please upload a smaller document.")
-
-    lower_name = filename.lower()
-    extracted_text = ""
-
-    if lower_name.endswith(".pdf"):
-        try:
-            import io
-            import pypdf
-
-            reader = pypdf.PdfReader(io.BytesIO(contents))
-            pages_text = []
-            for p_idx, page in enumerate(reader.pages):
-                pt = page.extract_text() or ""
-                if pt.strip():
-                    pages_text.append(f"### Page {p_idx + 1}\n{pt.strip()}")
-            extracted_text = "\n\n".join(pages_text)
-            if not extracted_text.strip():
-                raise HTTPException(
-                    status_code=400,
-                    detail="No selectable text found in PDF. This may be a scanned image or empty PDF. Please upload a PDF with selectable text.",
-                )
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Failed to parse PDF document: {str(e)}",
-            )
-    else:
-        # Plain text, Markdown, JSON, CSV
-        try:
-            extracted_text = contents.decode("utf-8")
-        except UnicodeDecodeError:
-            try:
-                extracted_text = contents.decode("latin-1")
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Unsupported file encoding: {str(e)}")
-
-    # Sanitize null bytes and control chars
-    extracted_text = extracted_text.replace("\x00", "").strip()
-    if not extracted_text:
-        raise HTTPException(status_code=400, detail="Extracted document content is empty.")
-
-    try:
-        chunk_count = rag_store.ingest(
-            user_id=resolved_user_id,
-            doc_id=doc_id,
-            text=extracted_text,
-            title=clean_title,
-            session_id=resolved_session_id,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to index document: {str(e)}")
-
-    return {
-        "status": "success",
-        "document_id": doc_id,
-        "filename": filename,
-        "title": clean_title,
-        "user_id": resolved_user_id,
-        "session_id": resolved_session_id,
-        "chunks_indexed": chunk_count,
-        "user_total_chunks": rag_store.total_chunks(user_id=resolved_user_id),
-        "session_total_chunks": rag_store.total_chunks(user_id=resolved_user_id, session_id=resolved_session_id),
-    }
-
-
 @app.get("/api/v1/documents/chunks")
 def list_indexed_chunks(
     user_id: str = Query("student-1", description="User ID"),
@@ -448,15 +242,11 @@ def list_indexed_chunks(
     """
     Returns chunks stored in DB for the given user and session.
     """
-    resolved_uid = user_id if isinstance(user_id, str) else "student-1"
-    resolved_sid = session_id if isinstance(session_id, str) else None
-    resolved_limit = limit if isinstance(limit, int) else 50
-
-    chunks = rag_store.list_chunks(user_id=resolved_uid, session_id=resolved_sid, limit=resolved_limit)
+    chunks = rag_store.list_chunks(user_id=user_id, session_id=session_id, limit=limit)
     return {
-        "user_id": resolved_uid,
-        "session_id": resolved_sid,
-        "total_chunks": rag_store.total_chunks(user_id=resolved_uid, session_id=resolved_sid),
+        "user_id": user_id,
+        "session_id": session_id,
+        "total_chunks": rag_store.total_chunks(user_id=user_id, session_id=session_id),
         "chunks": chunks,
     }
 
@@ -469,13 +259,10 @@ def list_documents(
     """
     Returns list of ingested documents for the given user and session.
     """
-    resolved_uid = user_id if isinstance(user_id, str) else "student-1"
-    resolved_sid = session_id if isinstance(session_id, str) else None
-
-    docs = rag_store.list_documents(user_id=resolved_uid, session_id=resolved_sid)
+    docs = rag_store.list_documents(user_id=user_id, session_id=session_id)
     return {
-        "user_id": resolved_uid,
-        "session_id": resolved_sid,
+        "user_id": user_id,
+        "session_id": session_id,
         "documents": docs,
     }
 
@@ -488,8 +275,7 @@ def delete_document(
     """
     Deletes a document and all its chunks for the user from both DB and memory index.
     """
-    resolved_uid = user_id if isinstance(user_id, str) else "student-1"
-    deleted = rag_store.delete_document(user_id=resolved_uid, doc_id=document_id)
+    deleted = rag_store.delete_document(user_id=user_id, doc_id=document_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Document not found or does not belong to user.")
     return {"status": "success", "deleted_document_id": document_id}

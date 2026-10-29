@@ -18,6 +18,7 @@ def persist_turn(
     user_text: str,
     assistant_text: str,
     *,
+    session_id=None,
     intent=None,
     language=None,
     sources=None,
@@ -32,7 +33,7 @@ def persist_turn(
         with session_scope() as db:
             user = UserRepository(db).get_or_create(f"{user_id}@aria.local", user_id)
             memory = ChatMemory(db)
-            memory.remember(user.id, "user", user_text)
+            memory.remember(user.id, "user", user_text, session_id=session_id)
 
             tools = []
             for a in actions or []:
@@ -47,6 +48,7 @@ def persist_turn(
 
             memory.remember(
                 user.id, "assistant", assistant_text,
+                session_id=session_id,
                 detected_language=language, intent=intent,
                 latency_ms=latency_ms, sources=_clean(sources or []),
                 tool_executions=tools,
