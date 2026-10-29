@@ -29,13 +29,12 @@ export function WelcomePanel({ onSelectSuggestion, onOpenIngest }) {
         Connected with RAG and FastMCP study tools.
       </p>
 
-      {/* Prominent Knowledge Base Ingestion Card */}
       <div className="welcome__ingest-card">
         <div className="welcome__ingest-content">
-          <div className="welcome__ingest-badge">📥 Knowledge Base Ingestion</div>
-          <h3 className="welcome__ingest-heading">Upload or Ingest Your Study Materials</h3>
+          <div className="welcome__ingest-badge">Study materials</div>
+          <h3 className="welcome__ingest-heading">Add your study materials</h3>
           <p className="welcome__ingest-text">
-            Upload text files, PDFs, or paste lecture notes into your database to enable grounded answers, active-recall flashcards, and quizzes.
+            Upload text files or PDFs, or paste lecture notes to get answers, flashcards, and quizzes based on your materials.
           </p>
         </div>
         <button
@@ -43,7 +42,7 @@ export function WelcomePanel({ onSelectSuggestion, onOpenIngest }) {
           onClick={onOpenIngest}
           type="button"
         >
-          <span>📥 Ingest Notes / Data File</span>
+          <span>Ingest Notes / Data File</span>
           <span className="welcome__ingest-arrow">→</span>
         </button>
       </div>

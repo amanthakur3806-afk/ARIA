@@ -25,7 +25,7 @@ export function TopBar({ onMenuClick, onThemeToggle, onOpenIngest, theme }) {
           title="Upload data file or ingest notes into knowledge base"
           type="button"
         >
-          <span className="topbar__ingest-icon">📥</span>
+          <Icon name="document" size={16} />
           <span>Upload / Ingest Notes</span>
         </button>
 

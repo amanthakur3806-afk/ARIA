@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Icon } from '../../components/ui/Icon'
 import './RagKnowledgeModal.css'
 
 const SAMPLE_PRESETS = [
@@ -274,7 +275,7 @@ export function RagKnowledgeModal({
         {/* Header */}
         <div className="rag-modal__header">
           <div className="rag-modal__title-wrap">
-            <div className="rag-modal__icon-badge">📚</div>
+            <div className="rag-modal__icon-badge"><Icon name="book" size={18} /></div>
             <div>
               <h2 className="rag-modal__title">RAG Knowledge Base & Document Ingestion</h2>
               <p className="rag-modal__subtitle">
@@ -282,15 +283,15 @@ export function RagKnowledgeModal({
               </p>
             </div>
           </div>
-          <button className="rag-modal__close-btn" onClick={onClose} type="button">
-            ✕
+          <button aria-label="Close dialog" className="rag-modal__close-btn" onClick={onClose} type="button">
+            <Icon name="close" size={18} />
           </button>
         </div>
 
         {/* User & Session Scope Strip */}
         <div className="rag-modal__scope-bar">
           <div className="scope-pill-group">
-            <span className="scope-pill-label">👤 Active Student:</span>
+            <span className="scope-pill-label">Active student</span>
             <select
               className="scope-select"
               value={userId}
@@ -304,7 +305,7 @@ export function RagKnowledgeModal({
           </div>
 
           <div className="scope-pill-group">
-            <span className="scope-pill-label">📁 Target Session:</span>
+            <span className="scope-pill-label">Target session</span>
             <input
               className="scope-select"
               type="text"
@@ -319,7 +320,7 @@ export function RagKnowledgeModal({
           </div>
 
           <div className="scope-stat-pill">
-            🗄️ {chunks.length} chunks in DB for {userId}
+            {chunks.length} chunks in DB for {userId}
           </div>
         </div>
 
@@ -330,14 +331,14 @@ export function RagKnowledgeModal({
             onClick={() => setActiveTab('ingest')}
             type="button"
           >
-            📥 Upload & Ingest Notes
+            Upload & Ingest Notes
           </button>
           <button
             className={`rag-tab-btn ${activeTab === 'explorer' ? 'rag-tab-btn--active' : ''}`}
             onClick={() => setActiveTab('explorer')}
             type="button"
           >
-            🔍 Database Chunks Explorer ({chunks.length})
+            Database Chunks Explorer ({chunks.length})
           </button>
         </div>
 
@@ -347,7 +348,7 @@ export function RagKnowledgeModal({
             <form className="ingest-form" onSubmit={handleIngest}>
               {statusMessage && (
                 <div className={`rag-status-alert rag-status-alert--${statusMessage.type}`}>
-                  {statusMessage.type === 'success' ? '✓' : '⚠️'} {statusMessage.text}
+                  {statusMessage.type === 'success' ? 'Success' : 'Error'}: {statusMessage.text}
                 </div>
               )}
 
@@ -362,7 +363,7 @@ export function RagKnowledgeModal({
                   onDrop={handleDrop}
                 >
                   <label className="file-drop-label">
-                    <span className="file-drop-icon">📁</span>
+                    <span className="file-drop-icon"><Icon name="document" size={24} /></span>
                     <div className="file-drop-text">
                       <strong>Choose a file from your computer or drag & drop here</strong>
                       <span>Supports PDF textbook slides, Markdown, and TXT notes (up to 10 MB)</span>
@@ -376,13 +377,13 @@ export function RagKnowledgeModal({
                   </label>
                   {selectedFileName && (
                     <div className="selected-file-badge">
-                      <span>📄 Selected: <strong>{selectedFileName}</strong> {selectedFile ? `(${(selectedFile.size / 1024).toFixed(1)} KB)` : ''}</span>
+                      <span>Selected: <strong>{selectedFileName}</strong> {selectedFile ? `(${(selectedFile.size / 1024).toFixed(1)} KB)` : ''}</span>
                       <button
                         type="button"
                         className="file-remove-btn"
                         onClick={handleRemoveFile}
                       >
-                        ✕ Remove
+                        Remove
                       </button>
                     </div>
                   )}
@@ -391,7 +392,7 @@ export function RagKnowledgeModal({
 
               {/* Presets */}
               <div className="sample-presets">
-                <span className="sample-presets-label">⚡ Or Choose a Quick Sample Preset:</span>
+                <span className="sample-presets-label">Or choose a sample preset:</span>
                 {SAMPLE_PRESETS.map((p, idx) => (
                   <button
                     key={idx}
@@ -473,7 +474,7 @@ export function RagKnowledgeModal({
                 <p style={{ textAlign: 'center', color: '#94a3b8' }}>Loading chunks from database...</p>
               ) : chunks.length === 0 ? (
                 <div className="empty-chunks-placeholder">
-                  <div className="empty-chunks-icon">📂</div>
+                  <div className="empty-chunks-icon"><Icon name="book" size={30} /></div>
                   <p>No study chunks stored in the database for this student & session yet.</p>
                   <p style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '4px' }}>
                     ARIA will reply with a prompt to upload data until you ingest notes here.

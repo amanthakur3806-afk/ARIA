@@ -325,15 +325,15 @@
   max-width: 680px;
   margin: 18px 0 24px;
   padding: 16px 20px;
-  border-radius: 14px;
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(168, 85, 247, 0.05) 100%);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-surface);
   text-align: left;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 18px rgb(38 52 45 / 5%);
 }
 
 .welcome__ingest-badge {
@@ -342,8 +342,8 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #6366f1;
-  background: rgba(99, 102, 241, 0.12);
+  color: var(--color-green-dark);
+  background: var(--color-green-surface);
   padding: 3px 8px;
   border-radius: 20px;
   margin-bottom: 6px;
@@ -371,18 +371,23 @@
   padding: 10px 18px;
   border-radius: 10px;
   border: none;
-  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  background: var(--color-green);
   color: #fff;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
-  transition: all 0.15s ease;
+  box-shadow: 0 4px 12px rgb(52 89 65 / 20%);
+  transition: background-color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
 }
 
 .welcome__ingest-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(79, 70, 229, 0.45);
+  background: var(--color-green-dark);
+  box-shadow: 0 6px 16px rgb(52 89 65 / 28%);
+}
+
+:root[data-theme='dark'] .welcome__ingest-btn {
+  color: #1c211d;
 }
 
 .welcome__ingest-arrow {
@@ -404,4 +409,3 @@
     justify-content: center;
   }
 }
-

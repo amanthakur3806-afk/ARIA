@@ -72,7 +72,7 @@ export function MermaidDiagram({ code }) {
   return (
     <div className="mermaid-diagram-wrap">
       <div className="mermaid-diagram-wrap__toolbar">
-        <span className="mermaid-toolbar__badge">📊 Mermaid Flowchart</span>
+        <span className="mermaid-toolbar__badge">Mermaid Flowchart</span>
         <div className="mermaid-toolbar__actions">
           <button
             type="button"
@@ -80,7 +80,7 @@ export function MermaidDiagram({ code }) {
             onClick={() => setShowCode(!showCode)}
             title="Toggle between SVG diagram and Markdown code"
           >
-            {showCode ? '🖼️ View Diagram' : '💻 View Code'}
+            {showCode ? 'View Diagram' : 'View Code'}
           </button>
           <button
             type="button"
@@ -88,7 +88,7 @@ export function MermaidDiagram({ code }) {
             onClick={handleCopy}
             title="Copy Mermaid Markdown syntax"
           >
-            {copied ? '✅ Copied' : '📋 Copy Markdown'}
+            {copied ? 'Copied' : 'Copy Markdown'}
           </button>
         </div>
       </div>
@@ -99,7 +99,7 @@ export function MermaidDiagram({ code }) {
         </pre>
       ) : renderError ? (
         <div className="mermaid-error-fallback">
-          <p className="mermaid-error-text">⚠️ <em>Diagram rendered in text mode:</em></p>
+          <p className="mermaid-error-text"><em>Diagram rendered in text mode:</em></p>
           <pre className="mermaid-code-view">
             <code>{cleanCode}</code>
           </pre>
@@ -137,7 +137,7 @@ export function FlowchartWidget({ flowchart }) {
     <div className="flowchart-widget">
       <div className="flowchart-widget__header">
         <div className="flowchart-title-area">
-          <span className="flowchart-badge">🗺️ Interactive Workflow</span>
+          <span className="flowchart-badge">Interactive Workflow</span>
           <h3 className="flowchart-title">{title}</h3>
         </div>
       </div>
@@ -151,7 +151,7 @@ export function FlowchartWidget({ flowchart }) {
           className={`flowchart-tab-btn ${activeTab === 'diagram' ? 'flowchart-tab-btn--active' : ''}`}
           onClick={() => setActiveTab('diagram')}
         >
-          📊 Flowchart Diagram
+          Flowchart Diagram
         </button>
         {steps_walkthrough.length > 0 && (
           <button
@@ -161,7 +161,7 @@ export function FlowchartWidget({ flowchart }) {
             className={`flowchart-tab-btn ${activeTab === 'walkthrough' ? 'flowchart-tab-btn--active' : ''}`}
             onClick={() => setActiveTab('walkthrough')}
           >
-            🔍 Step Walkthrough ({steps_walkthrough.length})
+            Step Walkthrough ({steps_walkthrough.length})
           </button>
         )}
         {components.length > 0 && (
@@ -172,7 +172,7 @@ export function FlowchartWidget({ flowchart }) {
             className={`flowchart-tab-btn ${activeTab === 'components' ? 'flowchart-tab-btn--active' : ''}`}
             onClick={() => setActiveTab('components')}
           >
-            ⚙️ Components ({components.length})
+            Components ({components.length})
           </button>
         )}
         {decision_points.length > 0 && (
@@ -183,7 +183,7 @@ export function FlowchartWidget({ flowchart }) {
             className={`flowchart-tab-btn ${activeTab === 'decisions' ? 'flowchart-tab-btn--active' : ''}`}
             onClick={() => setActiveTab('decisions')}
           >
-            ⚖️ Decisions ({decision_points.length})
+            Decisions ({decision_points.length})
           </button>
         )}
       </div>
@@ -235,11 +235,11 @@ export function FlowchartWidget({ flowchart }) {
                 </div>
                 <div className="decision-branches">
                   <div className="decision-branch decision-branch--yes">
-                    <span className="branch-tag">✅ YES / TRUE</span>
+                    <span className="branch-tag">YES / TRUE</span>
                     <p>{dp.outcome_yes}</p>
                   </div>
                   <div className="decision-branch decision-branch--no">
-                    <span className="branch-tag">❌ NO / FALSE</span>
+                    <span className="branch-tag">NO / FALSE</span>
                     <p>{dp.outcome_no}</p>
                   </div>
                 </div>

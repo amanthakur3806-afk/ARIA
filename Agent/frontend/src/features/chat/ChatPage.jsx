@@ -57,6 +57,21 @@ async function readChatStream(response, onToken, onComplete) {
   }
 }
 
+function removeEmoji(text) {
+  return text.replace(/\p{Extended_Pictographic}|\p{Emoji_Modifier}|\p{Regional_Indicator}|\uFE0F|\u200D|\u20E3/gu, '')
+}
+
+function sanitizeDisplayValue(value) {
+  if (typeof value === 'string') return removeEmoji(value)
+  if (Array.isArray(value)) return value.map(sanitizeDisplayValue)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nestedValue]) => [key, sanitizeDisplayValue(nestedValue)]),
+    )
+  }
+  return value
+}
+
 export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSetIsOpen }) {
   const [messages, setMessages] = useState([])
   const [isLoading, setIsLoading] = useState(false)
@@ -64,7 +79,6 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
   const [userId, setUserId] = useState('student-1')
   const [sessionId, setSessionId] = useState('thread-1')
   const [localIsOpen, setLocalIsOpen] = useState(false)
-  const [chunkCount, setChunkCount] = useState(0)
   const [fileToIngest, setFileToIngest] = useState(null)
   const messagesEndRef = useRef(null)
 
@@ -85,22 +99,6 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
     const isStreaming = messages.some((message) => message.isStreaming)
     messagesEndRef.current?.scrollIntoView({ behavior: isStreaming ? 'auto' : 'smooth' })
   }, [messages, isLoading])
-
-  async function updateChunkCount(uid = userId, sid = sessionId) {
-    try {
-      const res = await fetch(`/api/v1/documents/chunks?user_id=${encodeURIComponent(uid)}&session_id=${encodeURIComponent(sid)}`)
-      if (res.ok) {
-        const data = await res.json()
-        setChunkCount(data.total_chunks || 0)
-      }
-    } catch (e) {
-      console.warn('Failed to fetch chunks:', e)
-    }
-  }
-
-  useEffect(() => {
-    updateChunkCount(userId, sessionId)
-  }, [userId, sessionId])
 
   async function handleSendMessage(text) {
     if (!text || isLoading) return
@@ -153,7 +151,7 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
           )))
         },
         (data) => {
-          const assistantData = data.assistant_message || {}
+          const assistantData = sanitizeDisplayValue(data.assistant_message || {})
           setMessages((prev) => prev.map((message) => (
             message.id === assistantMessageId
               ? {
@@ -176,7 +174,7 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
         message.id === assistantMessageId
           ? {
               ...message,
-              content: `⚠️ **Unable to complete this response.**\n\n*Error details:* ${err.message}`,
+              content: `Unable to complete this response.\n\nError details: ${err.message}`,
               isError: true,
               isStreaming: false,
             }
@@ -189,32 +187,6 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
 
   return (
     <section aria-label="Study chat" className="chat-page">
-      {/* User & Session & RAG Knowledge Bar */}
-      <div className="chat-scope-bar">
-        <div className="chat-scope-bar__item">
-          <span className="scope-icon">👤</span>
-          <span className="scope-label">Student:</span>
-          <strong className="scope-val">{userId}</strong>
-        </div>
-        <div className="chat-scope-bar__divider">•</div>
-        <div className="chat-scope-bar__item">
-          <span className="scope-icon">📁</span>
-          <span className="scope-label">Session:</span>
-          <strong className="scope-val">{sessionId}</strong>
-        </div>
-        <div className="chat-scope-bar__divider">•</div>
-        <button
-          className="chat-scope-rag-btn"
-          onClick={() => setModalOpen(true)}
-          title="Open RAG Knowledge Base and DB Chunks Explorer"
-          type="button"
-        >
-          <span>📚 Knowledge Base:</span>
-          <strong>{chunkCount} chunks in DB</strong>
-          <span className="rag-btn-pill">Manage Notes</span>
-        </button>
-      </div>
-
       {messages.length === 0 ? (
         <div className="chat-page__welcome">
           <WelcomePanel
@@ -264,13 +236,10 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
         fileToIngest={fileToIngest}
         onUserChange={(newUid) => {
           setUserId(newUid)
-          updateChunkCount(newUid, sessionId)
         }}
         onSessionChange={(newSid) => {
           setSessionId(newSid)
-          updateChunkCount(userId, newSid)
         }}
-        onDocumentIngested={() => updateChunkCount(userId, sessionId)}
       />
     </section>
   )
@@ -283,7 +252,7 @@ function MessageItem({ message }) {
     return (
       <div className="message message--user">
         <div className="message__bubble message__bubble--user">
-          <p className="message__text">{message.content}</p>
+          <p className="message__text">{removeEmoji(message.content)}</p>
           <span className="message__time">{message.timestamp}</span>
         </div>
       </div>
@@ -299,7 +268,7 @@ function MessageItem({ message }) {
           <span className="message__time">{message.timestamp}</span>
           {message.latency_profile && (
             <span className="message__latency-pill" title="Execution latency">
-              ⚡ {message.latency_profile.total_agent_turn_ms}ms · {message.language || 'en'}
+              {message.latency_profile.total_agent_turn_ms}ms · {message.language || 'en'}
             </span>
           )}
         </div>
@@ -362,30 +331,19 @@ function MarkdownRenderer({ text, isStreaming = false }) {
 
   return (
     <div className={`markdown-body${isStreaming ? ' markdown-body--streaming' : ''}`}>
-      {paragraphs.map((para, idx) => {
-        const trimmed = para.trim()
-        if (!trimmed) return null
-
-        if (trimmed.startsWith('### ')) {
-          return <h3 key={idx}>{trimmed.replace('### ', '')}</h3>
-        }
-        // Mermaid diagram code blocks
-        if (trimmed.startsWith('```mermaid') || trimmed.includes('```mermaid')) {
-          const match = trimmed.match(/```mermaid([\s\S]*?)```/)
-          const mermaidCode = match ? match[1].trim() : trimmed.replace(/```mermaid/gi, '').replace(/```/g, '').trim()
-          return <MermaidDiagram key={idx} code={mermaidCode} />
+      {blocks.map((block, bIdx) => {
+        if (block.type === 'mermaid') {
+          return <MermaidDiagram key={bIdx} code={removeEmoji(block.content)} />
         }
         if (block.type === 'code') {
           return (
             <pre key={bIdx} className="code-block" style={{ padding: '10px 12px', background: '#1e1e1e', color: '#d4d4d4', borderRadius: '6px', overflowX: 'auto', fontSize: '12px' }}>
-              <code>{block.content}</code>
+              <code>{removeEmoji(block.content)}</code>
             </pre>
           )
         }
 
-        // Render normal text block split into paragraphs
-        const paragraphs = block.content.split(/\r?\n\r?\n/)
-        return paragraphs.map((para, pIdx) => {
+        return removeEmoji(block.content).split(/\r?\n\r?\n/).map((para, pIdx) => {
           const trimmed = para.trim()
           if (!trimmed) return null
           const key = `${bIdx}_${pIdx}`
@@ -420,7 +378,7 @@ function MarkdownRenderer({ text, isStreaming = false }) {
 }
 
 function formatInline(str) {
-  return str
+  return removeEmoji(str)
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -437,7 +395,7 @@ function FlashcardWidget({ cards }) {
   return (
     <div className="flashcard-widget">
       <div className="flashcard-widget__header">
-        <span className="flashcard-widget__badge">🗂️ Flashcard Deck ({currentIdx + 1}/{cards.length})</span>
+        <span className="flashcard-widget__badge">Flashcard Deck ({currentIdx + 1}/{cards.length})</span>
         <span className={`difficulty-badge difficulty-badge--${card.difficulty || 'medium'}`}>
           {card.difficulty || 'medium'}
         </span>
@@ -452,12 +410,12 @@ function FlashcardWidget({ cards }) {
         <div className="flashcard-card__side flashcard-card__front">
           <span className="card-label">PROMPT / CONCEPT</span>
           <p className="card-content">{card.front}</p>
-          <span className="card-hint">Click card to reveal answer 🔄</span>
+          <span className="card-hint">Click card to reveal answer</span>
         </div>
         <div className="flashcard-card__side flashcard-card__back">
           <span className="card-label">EXPLANATION</span>
           <div className="card-content" dangerouslySetInnerHTML={{ __html: formatInline(card.back) }} />
-          <span className="card-hint">Click to flip back 🔄</span>
+          <span className="card-hint">Click to flip back</span>
         </div>
       </div>
 
@@ -496,7 +454,7 @@ function QuizWidget({ questions }) {
   return (
     <div className="quiz-widget">
       <div className="quiz-widget__header">
-        <span>🎯 Practice Quiz ({questions.length} Questions)</span>
+        <span>Practice Quiz ({questions.length} Questions)</span>
       </div>
 
       {questions.map((q, qIndex) => {
@@ -537,7 +495,7 @@ function QuizWidget({ questions }) {
 
             {isAnswered && (
               <div className={`quiz-feedback ${isCorrect ? 'quiz-feedback--good' : 'quiz-feedback--retry'}`}>
-                <span>{isCorrect ? '✓ Correct!' : '✗ Not quite.'}</span> {q.explanation}
+                <span>{isCorrect ? 'Correct!' : 'Not quite.'}</span> {q.explanation}
               </div>
             )}
           </div>
@@ -554,7 +512,7 @@ function StudyPlanWidget({ plan }) {
   return (
     <div className="plan-widget">
       <div className="plan-widget__header">
-        <span>🗓️ Revision Plan ({plan.total_duration_minutes || 45} mins total)</span>
+        <span>Revision Plan ({plan.total_duration_minutes || 45} mins total)</span>
       </div>
       <div className="plan-phases">
         {plan.phases.map((p) => (
@@ -590,7 +548,7 @@ function SourcesAccordion({ sources }) {
         onClick={() => setIsOpen(!isOpen)}
         type="button"
       >
-        <span>📚 Verified Course Sources ({sources.length})</span>
+        <span>Verified Course Sources ({sources.length})</span>
         <Icon name="chevron" size={13} className={isOpen ? 'icon--rotated' : ''} />
       </button>
 

@@ -109,23 +109,22 @@
   align-items: center;
   gap: 7px;
   padding: 0 14px;
-  border: 1px solid rgba(79, 70, 229, 0.4);
+  border: 1px solid var(--color-border-strong);
   border-radius: 20px;
-  color: #fff;
-  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  color: var(--color-green-dark);
+  background: var(--color-green-surface);
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 2px 10px rgba(79, 70, 229, 0.35);
-  transition: all 0.15s ease;
+  transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
 }
 
 .topbar__ingest-btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.5);
-  background: linear-gradient(135deg, #4338ca, #6d28d9);
+  border-color: var(--color-green);
+  background: var(--color-green-soft);
 }
 
-.topbar__ingest-icon {
-  font-size: 14px;
+:root[data-theme='dark'] .topbar__ingest-btn {
+  color: #1c211d;
 }

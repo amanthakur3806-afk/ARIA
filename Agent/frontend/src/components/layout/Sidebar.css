@@ -44,13 +44,6 @@
   background: var(--color-green-surface);
 }
 
-.new-chat-button__shortcut {
-  margin-left: auto;
-  color: var(--color-text-muted);
-  font-size: 10px;
-  font-weight: 500;
-}
-
 .sidebar__section-label {
   margin: 35px 0 11px 9px;
   color: var(--color-text-muted);

@@ -20,7 +20,6 @@ export function Sidebar({ isOpen, onClose, onNewChat, onOpenIngest }) {
       <button className="new-chat-button" onClick={onNewChat} type="button">
         <Icon name="plus" size={18} />
         <span>New study chat</span>
-        <span aria-hidden="true" className="new-chat-button__shortcut">⌘ K</span>
       </button>
 
       <div className="sidebar__section-label">Workspace</div>
