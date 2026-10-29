@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 import uuid
@@ -109,6 +110,17 @@ def health_check():
     }
 
 
+def _stream_text_smoothly(text: str, on_token: Callable[[str], None]):
+    """Paces text streaming smoothly into word/punctuation tokens for responsive UI rendering."""
+    if not text:
+        return
+    tokens = re.split(r'(\s+)', text)
+    delay_s = max(0.004, min(0.015, 1.5 / max(len(tokens), 1)))
+    for token in tokens:
+        if token:
+            on_token(token)
+            time.sleep(delay_s)
+
 @app.post("/api/v1/chat/threads/{thread_id}/messages")
 @app.post("/api/chat")
 def handle_chat_message(
@@ -130,6 +142,7 @@ def handle_chat_message(
     _t0 = time.perf_counter()
     user_id = payload.user_id or "student-1"
     raw_message = payload.message
+    print(f'[ARIA CHAT QUERY] user={user_id} thread={resolved_thread_id}: {raw_message!r}', flush=True)
 
     # 1. Layer 1: Input Guard
     val_res = InputGuard.validate(raw_message, authenticated_user_id=user_id)
@@ -145,6 +158,9 @@ def handle_chat_message(
                 status=val_res.status,
                 decision_reason=val_res.refusal_reason or "security_refusal",
             )
+            refusal_msg = val_res.error_message or SECURITY_REFUSAL_MESSAGE
+            if on_token:
+                _stream_text_smoothly(refusal_msg, on_token)
             return {
                 "thread_id": resolved_thread_id,
                 "user_id": user_id,
@@ -188,8 +204,7 @@ def handle_chat_message(
 
             persist_turn(user_id, message_text, default_reply, intent="no_data_prompt", language="en")
             if on_token:
-                for offset in range(0, len(default_reply), 32):
-                    on_token(default_reply[offset:offset + 32])
+                _stream_text_smoothly(default_reply, on_token)
 
             return {
                 "thread_id": resolved_thread_id,
@@ -214,12 +229,13 @@ def handle_chat_message(
             query=message_text,
             top_k=DEFAULT_TOP_K,
             session_id=resolved_thread_id,
-            allow_curriculum_fallback=False,
+            allow_curriculum_fallback=True,
         )
 
         # 2. Layer 2: Retrieval Gate evaluated BEFORE model call
         intent = agent.detect_intent(message_text)
         gate_res = RetrievalGate.evaluate(matched_chunks, scores, min_score=RAG_MIN_SCORE)
+        print(f'[ARIA RAG GATE] user={user_id} thread={resolved_thread_id} chunks={len(matched_chunks)} top_score={(scores[0] if scores else None)} gate_path={gate_res.path} reason={gate_res.decision_reason}', flush=True)
         if gate_res.path == DecisionPath.NO_CONTEXT and intent != StudyIntent.CONVERSATIONAL_GUIDE:
             decision_logger.log(
                 user_id=user_id,
@@ -231,8 +247,7 @@ def handle_chat_message(
             )
             persist_turn(user_id, message_text, NO_CONTEXT_MESSAGE, intent="no_context", language="en")
             if on_token:
-                for offset in range(0, len(NO_CONTEXT_MESSAGE), 32):
-                    on_token(NO_CONTEXT_MESSAGE[offset:offset + 32])
+                _stream_text_smoothly(NO_CONTEXT_MESSAGE, on_token)
 
             return {
                 "thread_id": resolved_thread_id,
@@ -269,12 +284,15 @@ def handle_chat_message(
         )
         if on_token:
             emitted_text = "".join(streamed_content)
-            if response.content.startswith(emitted_text):
-                remaining_content = response.content[len(emitted_text):]
+            if emitted_text:
+                if response.content.startswith(emitted_text):
+                    remaining_content = response.content[len(emitted_text):]
+                else:
+                    remaining_content = ""
             else:
                 remaining_content = response.content
-            for offset in range(0, len(remaining_content), 32):
-                on_token(remaining_content[offset:offset + 32])
+            if remaining_content:
+                _stream_text_smoothly(remaining_content, on_token)
 
         user_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
         assistant_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
@@ -330,11 +348,10 @@ def stream_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = 
                     on_token=lambda content: events.put(("token", {"content": content})),
                 )
                 assistant_message = result["assistant_message"]
-                metadata = {key: value for key, value in assistant_message.items() if key != "content"}
                 events.put(("complete", {
                     "thread_id": result["thread_id"],
                     "user_id": result["user_id"],
-                    "assistant_message": metadata,
+                    "assistant_message": assistant_message,
                 }))
             except HTTPException as error:
                 events.put(("error", {"detail": error.detail}))

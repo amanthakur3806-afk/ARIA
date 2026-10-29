@@ -6,7 +6,7 @@ import { FlowchartWidget, MermaidDiagram } from './FlowchartWidget'
 import { RagKnowledgeModal } from '../rag/RagKnowledgeModal'
 import './ChatPage.css'
 
-async function readChatStream(response, onToken, onComplete) {
+async function readChatStream(response, onToken, onComplete, onStructuredData) {
   if (!response.body) {
     throw new Error('The server did not provide a streaming response.')
   }
@@ -27,6 +27,7 @@ async function readChatStream(response, onToken, onComplete) {
     if (!dataLines.length) return
     const eventData = JSON.parse(dataLines.join('\n'))
     if (eventName === 'token') onToken(eventData.content)
+    if (eventName === 'structured_data' && onStructuredData) onStructuredData(eventData.structured_data)
     if (eventName === 'error') throw new Error(eventData.detail || 'The response stream failed.')
     if (eventName === 'complete') {
       completed = true
@@ -161,10 +162,18 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
                   ...assistantData,
                   id: assistantData.id || assistantMessageId,
                   role: 'assistant',
-                  content: message.content,
+                  content: assistantData.content || message.content || '',
+                  structured_data: assistantData.structured_data || message.structured_data,
                   isStreaming: false,
                   timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 }
+              : message
+          )))
+        },
+        (structuredData) => {
+          setMessages((prev) => prev.map((message) => (
+            message.id === assistantMessageId
+              ? { ...message, structured_data: structuredData }
               : message
           )))
         },
@@ -270,7 +279,14 @@ export function ChatPage({ isRagModalOpen: propIsOpen, setIsRagModalOpen: propSe
           setSessionId(newSid)
           updateChunkCount(userId, newSid)
         }}
-        onDocumentIngested={() => updateChunkCount(userId, sessionId)}
+        onDocumentIngested={(data) => {
+          if (data?.session_id) {
+            setSessionId(data.session_id)
+            updateChunkCount(userId, data.session_id)
+          } else {
+            updateChunkCount(userId, sessionId)
+          }
+        }}
       />
     </section>
   )
@@ -352,7 +368,7 @@ function MarkdownRenderer({ text, isStreaming = false }) {
     blocks.push({
       type: tag === 'mermaid' ? 'mermaid' : 'code',
       lang: tag,
-      content: match[2].trim()
+      content: match[2].trim(),
     })
     lastIndex = match.index + match[0].length
   }
@@ -362,33 +378,35 @@ function MarkdownRenderer({ text, isStreaming = false }) {
 
   return (
     <div className={`markdown-body${isStreaming ? ' markdown-body--streaming' : ''}`}>
-      {paragraphs.map((para, idx) => {
-        const trimmed = para.trim()
-        if (!trimmed) return null
-
-        if (trimmed.startsWith('### ')) {
-          return <h3 key={idx}>{trimmed.replace('### ', '')}</h3>
-        }
-        // Mermaid diagram code blocks
-        if (trimmed.startsWith('```mermaid') || trimmed.includes('```mermaid')) {
-          const match = trimmed.match(/```mermaid([\s\S]*?)```/)
-          const mermaidCode = match ? match[1].trim() : trimmed.replace(/```mermaid/gi, '').replace(/```/g, '').trim()
-          return <MermaidDiagram key={idx} code={mermaidCode} />
+      {blocks.map((block, bIdx) => {
+        if (block.type === 'mermaid') {
+          return <MermaidDiagram key={`mm_${bIdx}`} code={block.content} />
         }
         if (block.type === 'code') {
           return (
-            <pre key={bIdx} className="code-block" style={{ padding: '10px 12px', background: '#1e1e1e', color: '#d4d4d4', borderRadius: '6px', overflowX: 'auto', fontSize: '12px' }}>
+            <pre
+              key={`code_${bIdx}`}
+              className="code-block"
+              style={{
+                padding: '10px 12px',
+                background: '#1e1e1e',
+                color: '#d4d4d4',
+                borderRadius: '6px',
+                overflowX: 'auto',
+                fontSize: '12px',
+              }}
+            >
               <code>{block.content}</code>
             </pre>
           )
         }
 
         // Render normal text block split into paragraphs
-        const paragraphs = block.content.split(/\r?\n\r?\n/)
-        return paragraphs.map((para, pIdx) => {
+        const paras = block.content.split(/\r?\n\r?\n/)
+        return paras.map((para, pIdx) => {
           const trimmed = para.trim()
           if (!trimmed) return null
-          const key = `${bIdx}_${pIdx}`
+          const key = `p_${bIdx}_${pIdx}`
 
           if (trimmed.startsWith('### ')) {
             return <h3 key={key}>{trimmed.replace('### ', '')}</h3>
@@ -401,7 +419,12 @@ function MarkdownRenderer({ text, isStreaming = false }) {
           }
 
           // Bullet lists
-          if (trimmed.includes('\n• ') || trimmed.includes('\n- ') || trimmed.startsWith('• ') || trimmed.startsWith('- ')) {
+          if (
+            trimmed.includes('\n• ') ||
+            trimmed.includes('\n- ') ||
+            trimmed.startsWith('• ') ||
+            trimmed.startsWith('- ')
+          ) {
             const items = trimmed.split(/\r?\n[•-]\s*/).map((s) => s.replace(/^[•-]\s*/, ''))
             return (
               <ul key={key}>

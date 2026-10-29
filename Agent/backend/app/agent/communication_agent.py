@@ -40,8 +40,11 @@ def _load_env_file():
             Path.cwd() / ".env",
             Path.cwd() / "Agent" / ".env",
             Path.cwd() / "Agent" / "backend" / ".env",
+            Path(__file__).resolve().parent.parent.parent.parent.parent / ".env",
             Path(__file__).resolve().parent.parent.parent.parent / ".env",
             Path(__file__).resolve().parent.parent.parent / ".env",
+            Path(__file__).resolve().parent.parent / ".env",
+            Path(__file__).resolve().parent / ".env",
         ]
         # Load all existing .env files, prioritizing non-placeholder keys
         for p in candidates:
@@ -349,11 +352,16 @@ class BasicRetriever:
         q_lower = query.lower()
 
         # Check for overview / summary queries
-        is_overview_query = any(w in q_lower for w in [
-            "summarize", "summary", "overview", "what is this paper", "what is this document",
-            "explain this paper", "explain this document", "who are the authors", "who wrote",
-            "main findings", "key findings", "takeaways", "introduction"
-        ])
+        overview_triggers = [
+            "summarize", "summary", "overview", "what is this", "explain this",
+            "who are the authors", "who wrote", "main findings", "key findings",
+            "takeaways", "introduction", "about this", "this document", "this paper",
+            "this pdf", "this file", "my document", "my notes", "my paper",
+            "give me notes", "what did i upload", "study notes", "what is in here",
+            "what does this say", "help me understand this", "tell me about this",
+            "notes on this", "what is this about", "explain", "concepts"
+        ]
+        is_overview_query = any(w in q_lower for w in overview_triggers)
 
         for chunk in self.chunks:
             chunk_tokens = self._tokenize(chunk.text + " " + chunk.section + " " + chunk.title, filter_stops=False)
@@ -380,15 +388,31 @@ class BasicRetriever:
             # Overview / introductory chunk boost for summary queries
             if is_overview_query:
                 c_sec_lower = chunk.section.lower()
-                if any(ind in c_sec_lower for ind in ["page 1", "page 2", "overview", "chapter 1", "introduction", "abstract", "general"]):
-                    score += 2.5
+                c_title_lower = chunk.title.lower()
+                c_text_lower = chunk.text[:300].lower()
+                if any(ind in c_sec_lower or ind in c_title_lower or ind in c_text_lower for ind in [
+                    "page 1", "page 2", "overview", "chapter 1", "introduction", "abstract", "general", "title", "summary"
+                ]):
+                    score += 3.0
 
-            if query_tokens and score > 0:
-                overlap_ratio = matched_terms / len(query_tokens)
-                # Normalize to calibrated [0.0, 1.0] scale
-                norm_score = min(1.0, (score / (len(query_tokens) * 3.5)) * (0.5 + 0.5 * overlap_ratio))
+            if score > 0:
+                if query_tokens and matched_terms > 0:
+                    overlap_ratio = matched_terms / len(query_tokens)
+                    norm_score = min(1.0, (score / (len(query_tokens) * 3.5)) * (0.5 + 0.5 * overlap_ratio))
+                elif is_overview_query:
+                    norm_score = min(1.0, score / 4.0)
+                else:
+                    norm_score = 0.0
+
+                if is_overview_query and norm_score < 0.5:
+                    norm_score = 0.65
+
                 if norm_score >= threshold:
                     scored.append((norm_score, chunk))
+
+        if is_overview_query and not scored and self.chunks:
+            for c in self.chunks[:top_k]:
+                scored.append((0.65, c))
 
         # Sort descending by relevance score
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -470,6 +494,7 @@ class LLMCommunicator:
             answer, _ = self.generate_response(
                 prompt=prompt,
                 temperature=config.get("temperature", 0.2),
+                max_tokens=config.get("max_tokens", 1400),
                 system_instruction=sys_instruct
             )
             return answer
@@ -484,6 +509,7 @@ class LLMCommunicator:
         temperature: float = 0.3,
         system_instruction: Optional[str] = None,
         on_token: Optional[Callable[[str], None]] = None,
+        max_tokens: Optional[int] = None,
     ) -> Tuple[str, float]:
         """
         Sends prompt and grounded context to LLM, measuring roundtrip latency in milliseconds.
@@ -513,7 +539,7 @@ class LLMCommunicator:
                     f"4. Include intuitive real-world analogies, high-yield takeaways, and pro-tips."
                 )
                 sys_msg = system_instruction or default_sys
-                safe_max_tokens = min(LLM_MAX_TOKENS, 700)
+                safe_max_tokens = max_tokens or min(LLM_MAX_TOKENS, 700)
 
                 models_to_try = [self.groq_model]
                 if "openai/gpt-oss-20b" not in models_to_try:
@@ -633,7 +659,8 @@ class LLMCommunicator:
         context_chunks: Optional[List[str]] = None,
         language: str = "en",
         temperature: float = 0.3,
-        system_instruction: Optional[str] = None
+        system_instruction: Optional[str] = None,
+        max_tokens: Optional[int] = None,
     ) -> Iterator[str]:
         """
         Streams response tokens from Groq (primary) or OpenAI, with a graceful
@@ -660,7 +687,7 @@ class LLMCommunicator:
                     f"4. Include intuitive real-world analogies, high-yield takeaways, and pro-tips."
                 )
                 sys_msg = system_instruction or default_sys
-                safe_max_tokens = min(LLM_MAX_TOKENS, 700)
+                safe_max_tokens = max_tokens or min(LLM_MAX_TOKENS, 700)
 
                 models_to_try = [self.groq_model]
                 if "openai/gpt-oss-20b" not in models_to_try:
@@ -1082,6 +1109,104 @@ class LogicValidator:
 # 6. Communication Agent Implementation
 # ==============================================================================
 
+def clean_topic_title(raw_topic: str) -> str:
+    """Strips conversational query artifacts to isolate the clean academic topic."""
+    if not raw_topic:
+        return "Process Architecture"
+    cleaned = raw_topic.strip()
+    # Strip polite openings, command verbs, typos (e.g. genrate), and request prefixes
+    cleaned = re.sub(
+        r'^(?:please\s+)?(?:can\s+you\s+)?(?:create|make|generate|genrate|draw|show|build|give\s+me|provide|design)\s+(?:a\s+|an\s+)?(?:flow\s*chart|flowchart|workflow|diagram|architecture|process|map)\s+(?:for|of|about|on|explaining|showing)?\s*(?:topic\s*)?',
+        '',
+        cleaned,
+        flags=re.IGNORECASE
+    ).strip()
+    cleaned = re.sub(
+        r'^(?:flow\s*chart|flowchart|diagram|workflow)\s+(?:for|of|about|on|explaining|showing)?\s*(?:topic\s*)?',
+        '',
+        cleaned,
+        flags=re.IGNORECASE
+    ).strip()
+    cleaned = re.sub(r'^(?:explaining|showing|about|for\s+topic|for|topic)\s+', '', cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r'[?!.,;:]+$', '', cleaned).strip()
+    if cleaned.lower() == "mcp":
+        return "MCP (Model Context Protocol)"
+    return cleaned.title() if cleaned else "Process Architecture"
+
+
+def compute_adaptive_duration(
+    message: str,
+    user_preferences: Optional[Dict[str, Any]] = None,
+    context_chunks: Optional[List[str]] = None,
+) -> int:
+    """
+    Computes a tailored, pedagogical study plan duration (in minutes) based on:
+    1. Explicit duration request in the user prompt (e.g. '20 min', '1.5 hours', '45m').
+    2. User profile preference ('preferred_duration', 'daily_time_minutes', 'session_length').
+    3. Topic scope and difficulty:
+       - Quick / overview: 20-25 mins
+       - Deep dive / complex / exam / OS / systems: 60-90 mins
+       - Core / standard: 35-45 mins
+    """
+    msg_lower = (message or "").lower()
+
+    # 1. Explicit user query request
+    hr_match = re.search(r'\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\b', msg_lower)
+    if hr_match:
+        try:
+            hrs = float(hr_match.group(1))
+            return max(15, min(int(hrs * 60), 180))
+        except (ValueError, TypeError):
+            pass
+
+    min_match = re.search(r'\b(\d+)\s*(?:minutes?|mins?|min)\b', msg_lower)
+    if min_match:
+        try:
+            mins = int(min_match.group(1))
+            return max(15, min(mins, 180))
+        except (ValueError, TypeError):
+            pass
+
+    # 2. User profile preferences
+    if user_preferences:
+        pref_dur = (
+            user_preferences.get("preferred_duration") or
+            user_preferences.get("session_length") or
+            user_preferences.get("daily_time_minutes")
+        )
+        if pref_dur:
+            try:
+                val = int(pref_dur)
+                if 15 <= val <= 180:
+                    return val
+            except (ValueError, TypeError):
+                pass
+
+    # 3. Dynamic topic difficulty & scope estimation
+    quick_indicators = ["quick", "brief", "crash course", "summary", "overview", "intro", "basics", "simple", "fast", "starter"]
+    if any(q in msg_lower for q in quick_indicators):
+        return 25
+
+    deep_indicators = [
+        "deep dive", "comprehensive", "in-depth", "mastery", "exam", "advanced",
+        "internals", "architecture", "distributed", "concurrency", "operating system",
+        "deadlock", "virtual memory", "paging", "multithreading", "compiler"
+    ]
+    if any(d in msg_lower for d in deep_indicators):
+        return 60
+
+    # Context chunk density check: if large context provided (> 1000 words), allocate 50 mins
+    if context_chunks:
+        total_words = sum(len(str(c).split()) for c in context_chunks)
+        if total_words > 1000:
+            return 50
+        elif total_words < 200:
+            return 30
+
+    # Default balanced duration
+    return 35
+
+
 class CommunicationAgent:
     """
     ARIA Communication Agent with integrated RAG pipeline, MCP server tool bridge,
@@ -1206,8 +1331,17 @@ class CommunicationAgent:
 
         gate_res = RetrievalGate.evaluate(cand_chunks, cand_scores, min_score=RAG_MIN_SCORE)
 
-        # No-context path: honest refusal, 0 sources, NO model call
-        if gate_res.path == DecisionPath.NO_CONTEXT and intent != StudyIntent.CONVERSATIONAL_GUIDE:
+        # No-context path: honest refusal for questions with no uploaded documents
+        # Generative tools (Flowcharts, explicit Study Plans, Revision Workflows, Conversational Guide) synthesize using academic knowledge
+        msg_lower = sanitized_message.lower()
+        has_explicit_plan_request = any(w in msg_lower for w in ["plan", "schedule", "roadmap", "revision plan", "study plan", "timeline"])
+        is_generative_tool_intent = (
+            intent == StudyIntent.CONVERSATIONAL_GUIDE or
+            intent == StudyIntent.GENERATE_FLOWCHART or
+            intent == StudyIntent.FULL_REVISION_WORKFLOW or
+            (intent == StudyIntent.EXPLAIN_AND_PLAN and has_explicit_plan_request)
+        )
+        if gate_res.path == DecisionPath.NO_CONTEXT and not is_generative_tool_intent:
             total_turn_ms = (time.perf_counter() - t_start) * 1000.0
             decision_logger.log(
                 user_id=user_id,
@@ -1248,10 +1382,11 @@ class CommunicationAgent:
         # ----------------------------------------------------------------------
         if intent == StudyIntent.EXPLAIN_AND_PLAN:
             tone = user_preferences.get("preferred_tone") if user_preferences else None
+            plan_duration = compute_adaptive_duration(message, user_preferences, raw_text_chunks)
             plan_res, tool_ms = self.mcp.call_planner(
                 query=message,
                 tone=tone,
-                target_duration_minutes=45,
+                target_duration_minutes=plan_duration,
                 context_chunks=raw_text_chunks,
                 user_preferences=user_preferences,
             )
@@ -1274,15 +1409,11 @@ class CommunicationAgent:
                 on_token=on_token,
             )
 
+            total_dur = study_plan.get('total_duration_minutes', plan_duration)
             content_lines = [
                 f"{llm_text}\n",
-                f"### 🗓️ Recommended Revision Plan ({study_plan.get('total_duration_minutes', 45)} mins)"
+                f"> 💡 *A personalized **{total_dur}-minute** revision plan with interactive checklist milestones has been prepared in the card below.*"
             ]
-            for p in study_plan.get("phases", []):
-                content_lines.append(f"- **Phase {p['phase_number']}: {p['title']}** ({p['duration_minutes']} min)")
-                content_lines.append(f"  {p['description']}")
-                for item in p.get("action_items", []):
-                    content_lines.append(f"  - [ ] {item}")
 
             total_turn_ms = (time.perf_counter() - t_start) * 1000.0
             profile = LatencyProfile(
@@ -1419,8 +1550,9 @@ class CommunicationAgent:
         # 4. Intent: Full Revision Workflow
         # ----------------------------------------------------------------------
         elif intent == StudyIntent.GENERATE_FLOWCHART:
+            clean_topic = clean_topic_title(message)
             fc_res, tool_ms = self.mcp.call_flowchart(
-                topic=message,
+                topic=clean_topic,
                 context_chunks=raw_text_chunks,
                 orientation="TD",
                 detail_level="detailed",
@@ -1433,34 +1565,16 @@ class CommunicationAgent:
                 latency_ms=tool_ms
             ))
 
-            title = fc_res.get("title", "Process Workflow")
-            mermaid_code = fc_res.get("mermaid_markdown", "")
-            steps = fc_res.get("steps_walkthrough", [])
-            components = fc_res.get("components", [])
-            decision_points = fc_res.get("decision_points", [])
+            title = fc_res.get("title", f"{clean_topic} Architecture Flow")
+            steps_count = len(fc_res.get("steps_walkthrough", []))
+            comp_count = len(fc_res.get("components", []))
 
             content_lines = [
                 f"## 📊 {title}\n",
-                f"{mermaid_code}\n",
-                "### 🔍 Step-by-Step Execution Walkthrough ('What Happens When'):\n"
+                f"Here is the interactive architecture and execution workflow for **{clean_topic}**. "
+                f"It details the end-to-end lifecycle across {steps_count} chronological steps and {comp_count} core components.\n",
+                f"> 💡 *Explore the visual diagram, chronological walkthrough ('What happens when'), component roles, and decision logic in the interactive card below.*"
             ]
-            for s in steps:
-                content_lines.append(f"**Step {s.get('step')}: [{s.get('phase', 'Stage')}] — {s.get('component', '')}**")
-                content_lines.append(f"{s.get('action', '')}\n")
-
-            if components:
-                content_lines.append("### ⚙️ Key Components & Responsibilities:")
-                for c in components:
-                    content_lines.append(f"- **{c.get('name')}** (`{c.get('role')}`): {c.get('details')}")
-                content_lines.append("")
-
-            if decision_points:
-                content_lines.append("### ⚖️ Decision Branches:")
-                for d in decision_points:
-                    content_lines.append(f"- **Condition:** *\"{d.get('condition')}\"*")
-                    content_lines.append(f"  - ✅ **Yes:** {d.get('outcome_yes')}")
-                    content_lines.append(f"  - ❌ **No:** {d.get('outcome_no')}")
-                content_lines.append("")
 
             valid_logic, issues = self.logic.validate_flowchart_logic(fc_res)
 
@@ -1486,10 +1600,10 @@ class CommunicationAgent:
             )
 
         elif intent == StudyIntent.FULL_REVISION_WORKFLOW:
-            # 1. Flowchart for visual mental model
-            chart_res, t0_fc = self.mcp.call_flowchart(message, context_chunks=raw_text_chunks)
-            # 2. Planner for systematic revision milestones
-            p_res, t1 = self.mcp.call_planner(message, context_chunks=raw_text_chunks)
+            clean_topic = clean_topic_title(message)
+            chart_res, t0_fc = self.mcp.call_flowchart(clean_topic, context_chunks=raw_text_chunks)
+            wf_duration = compute_adaptive_duration(message, user_preferences, raw_text_chunks)
+            p_res, t1 = self.mcp.call_planner(message, target_duration_minutes=wf_duration, context_chunks=raw_text_chunks)
             # 3. Flashcards for active recall
             f_res, t2 = self.mcp.call_flashcards(raw_text_chunks, count=3)
             # 4. Quiz for self-testing
@@ -1517,7 +1631,7 @@ class CommunicationAgent:
                 f"{chart_res.get('mermaid_markdown', '')}\n\n"
                 f"### 📋 Session Breakdown:\n"
                 f"• **Visual Architecture Flow**: {chart_res.get('title')}\n"
-                f"• **Revision Plan**: {len(p_res.get('study_plan', {}).get('phases', []))} Phases ({p_res.get('study_plan', {}).get('total_duration_minutes', 45)} mins)\n"
+                f"• **Revision Plan**: {len(p_res.get('study_plan', {}).get('phases', []))} Phases ({p_res.get('study_plan', {}).get('total_duration_minutes', wf_duration)} mins)\n"
                 f"• **Active-Recall Flashcards**: {len(f_res.get('flashcards', []))} Cards\n"
                 f"• **Practice Questions**: {len(q_res.get('questions', []))} MCQs\n"
             )
@@ -1610,7 +1724,8 @@ class CommunicationAgent:
                 sanitized_message,
                 raw_text_chunks,
                 language=language,
-                system_instruction=GUARDRAIL_SYSTEM_PROMPT
+                system_instruction=GUARDRAIL_SYSTEM_PROMPT,
+                on_token=on_token,
             )
             guarded_res = OutputGuard.guard(raw_llm_text, included_sources, path=gate_res.path)
             total_turn_ms = (time.perf_counter() - t_start) * 1000.0
@@ -1710,8 +1825,17 @@ class CommunicationAgent:
 
         gate_res = RetrievalGate.evaluate(cand_chunks, cand_scores, min_score=RAG_MIN_SCORE)
 
-        # No-context path: honest refusal, 0 sources, NO model call
-        if gate_res.path == DecisionPath.NO_CONTEXT and intent != StudyIntent.CONVERSATIONAL_GUIDE:
+        # No-context path: honest refusal for questions with no uploaded documents
+        # Generative tools (Flowcharts, explicit Study Plans, Revision Workflows, Conversational Guide) synthesize using academic knowledge
+        msg_lower = sanitized_message.lower()
+        has_explicit_plan_request = any(w in msg_lower for w in ["plan", "schedule", "roadmap", "revision plan", "study plan", "timeline"])
+        is_generative_tool_intent = (
+            intent == StudyIntent.CONVERSATIONAL_GUIDE or
+            intent == StudyIntent.GENERATE_FLOWCHART or
+            intent == StudyIntent.FULL_REVISION_WORKFLOW or
+            (intent == StudyIntent.EXPLAIN_AND_PLAN and has_explicit_plan_request)
+        )
+        if gate_res.path == DecisionPath.NO_CONTEXT and not is_generative_tool_intent:
             total_turn_ms = (time.perf_counter() - t_start) * 1000.0
             decision_logger.log(
                 user_id=user_id,
@@ -1769,10 +1893,11 @@ class CommunicationAgent:
         # 2. Dispatch by intent
         if intent == StudyIntent.EXPLAIN_AND_PLAN:
             tone = user_preferences.get("preferred_tone") if user_preferences else None
+            plan_duration = compute_adaptive_duration(sanitized_message, user_preferences, raw_text_chunks)
             plan_res, tool_ms = self.mcp.call_planner(
                 query=sanitized_message,
                 tone=tone,
-                target_duration_minutes=45,
+                target_duration_minutes=plan_duration,
                 context_chunks=raw_text_chunks,
                 user_preferences=user_preferences,
             )
@@ -1793,18 +1918,9 @@ class CommunicationAgent:
                 yield {"type": "token", "content": token}
             llm_ms = (time.perf_counter() - t_llm_start) * 1000.0
 
-            # Stream revision plan section
-            plan_lines = [
-                f"\n\n### 🗓️ Recommended Revision Plan ({study_plan.get('total_duration_minutes', 45)} mins)\n"
-            ]
-            for p in study_plan.get("phases", []):
-                plan_lines.append(f"- **Phase {p['phase_number']}: {p['title']}** ({p['duration_minutes']} min)\n")
-                plan_lines.append(f"  {p['description']}\n")
-                for item in p.get("action_items", []):
-                    plan_lines.append(f"  - [ ] {item}\n")
-
-            for pl in plan_lines:
-                yield {"type": "token", "content": pl}
+            total_dur = study_plan.get('total_duration_minutes', plan_duration)
+            plan_note = f"\n\n> 💡 *A personalized **{total_dur}-minute** revision plan with interactive checklist milestones has been prepared in the card below.*\n"
+            yield {"type": "token", "content": plan_note}
 
             yield {
                 "type": "structured_data",
@@ -1875,8 +1991,9 @@ class CommunicationAgent:
             }
 
         elif intent == StudyIntent.GENERATE_FLOWCHART:
+            clean_topic = clean_topic_title(message)
             fc_res, tool_ms = self.mcp.call_flowchart(
-                topic=message,
+                topic=clean_topic,
                 context_chunks=raw_text_chunks,
                 orientation="TD",
                 detail_level="detailed",
@@ -1889,29 +2006,17 @@ class CommunicationAgent:
                 latency_ms=tool_ms
             ))
 
-            title = fc_res.get("title", "Process Workflow")
-            mermaid_code = fc_res.get("mermaid_markdown", "")
-            steps = fc_res.get("steps_walkthrough", [])
-            components = fc_res.get("components", [])
-            decision_points = fc_res.get("decision_points", [])
+            title = fc_res.get("title", f"{clean_topic} Architecture Flow")
+            steps_count = len(fc_res.get("steps_walkthrough", []))
+            comp_count = len(fc_res.get("components", []))
 
-            intro = f"## 📊 {title}\n\n{mermaid_code}\n\n### 🔍 Step-by-Step Execution Walkthrough ('What Happens When'):\n\n"
+            intro = (
+                f"## 📊 {title}\n\n"
+                f"Here is the interactive architecture and execution workflow for **{clean_topic}**. "
+                f"It details the end-to-end lifecycle across {steps_count} chronological steps and {comp_count} core components.\n\n"
+                f"> 💡 *Explore the visual diagram, chronological walkthrough ('What happens when'), component roles, and decision logic in the interactive card below.*\n"
+            )
             yield {"type": "token", "content": intro}
-            for s in steps:
-                step_text = f"**Step {s.get('step')}: [{s.get('phase', 'Stage')}] — {s.get('component', '')}**\n{s.get('action', '')}\n\n"
-                yield {"type": "token", "content": step_text}
-
-            if components:
-                comp_text = "### ⚙️ Key Components & Responsibilities:\n"
-                for c in components:
-                    comp_text += f"- **{c.get('name')}** (`{c.get('role')}`): {c.get('details')}\n"
-                yield {"type": "token", "content": comp_text + "\n"}
-
-            if decision_points:
-                dp_text = "### ⚖️ Decision Branches:\n"
-                for d in decision_points:
-                    dp_text += f"- **Condition:** *\"{d.get('condition')}\"*\n  - ✅ **Yes:** {d.get('outcome_yes')}\n  - ❌ **No:** {d.get('outcome_no')}\n"
-                yield {"type": "token", "content": dp_text + "\n"}
 
             valid_logic, issues = self.logic.validate_flowchart_logic(fc_res)
             yield {
@@ -1921,8 +2026,10 @@ class CommunicationAgent:
             }
 
         elif intent == StudyIntent.FULL_REVISION_WORKFLOW:
-            chart_res, t0_fc = self.mcp.call_flowchart(message, context_chunks=raw_text_chunks)
-            p_res, t1 = self.mcp.call_planner(message, context_chunks=raw_text_chunks)
+            clean_topic = clean_topic_title(message)
+            chart_res, t0_fc = self.mcp.call_flowchart(clean_topic, context_chunks=raw_text_chunks)
+            wf_duration = compute_adaptive_duration(message, user_preferences, raw_text_chunks)
+            p_res, t1 = self.mcp.call_planner(message, target_duration_minutes=wf_duration, context_chunks=raw_text_chunks)
             f_res, t2 = self.mcp.call_flashcards(raw_text_chunks, count=3)
             q_res, t3 = self.mcp.call_quiz(raw_text_chunks, num_questions=3)
             tool_execution_ms = t0_fc + t1 + t2 + t3
@@ -1947,7 +2054,7 @@ class CommunicationAgent:
                 f"{chart_res.get('mermaid_markdown', '')}\n\n"
                 f"### 📋 Session Breakdown:\n"
                 f"• **Visual Architecture Flow**: {chart_res.get('title')}\n"
-                f"• **Revision Plan**: {len(p_res.get('study_plan', {}).get('phases', []))} Phases ({p_res.get('study_plan', {}).get('total_duration_minutes', 45)} mins)\n"
+                f"• **Revision Plan**: {len(p_res.get('study_plan', {}).get('phases', []))} Phases ({p_res.get('study_plan', {}).get('total_duration_minutes', wf_duration)} mins)\n"
                 f"• **Active-Recall Flashcards**: {len(f_res.get('flashcards', []))} Cards\n"
                 f"• **Practice Questions**: {len(q_res.get('questions', []))} MCQs\n"
             )

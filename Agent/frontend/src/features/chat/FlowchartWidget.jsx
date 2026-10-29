@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import mermaid from 'mermaid'
 
-// Initialize Mermaid with safe defaults
+// Initialize Mermaid with safe defaults (htmlLabels: false avoids XML/DOMPurify entity errors)
 mermaid.initialize({
   startOnLoad: false,
   suppressErrorRendering: true,
@@ -10,48 +10,272 @@ mermaid.initialize({
   fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
   flowchart: {
     useMaxWidth: true,
-    htmlLabels: true,
+    htmlLabels: false,
     curve: 'basis',
   },
 })
 
 /**
- * Dedicated Mermaid Diagram renderer component.
- * Parses and renders Markdown Mermaid syntax into interactive SVGs.
+ * Robust client-side Mermaid sanitizer.
+ * Fixes unclosed brackets, dangling escapes, ampersands, slashes, and unbalanced subgraphs before parsing.
  */
-export function MermaidDiagram({ code }) {
+export function sanitizeMermaidCode(raw) {
+  if (!raw) return ''
+  let cleaned = String(raw).trim()
+  // Strip opening markdown code fence (with or without 'mermaid')
+  cleaned = cleaned.replace(/^```(?:mermaid)?\s*/i, '')
+  // Strip closing markdown code fence
+  cleaned = cleaned.replace(/```\s*$/i, '')
+  // Strip XML/HTML tags
+  cleaned = cleaned.replace(/<[^>]+>/g, '')
+  // Fix escaped quotes and newlines
+  cleaned = cleaned.replace(/\\"/g, '"').replace(/\\n/g, '\n')
+  // Strip stray backslashes
+  cleaned = cleaned.replace(/\\/g, '')
+
+  // Replace & with 'and' everywhere (Mermaid treats & as multi-connection syntax)
+  cleaned = cleaned.replace(/&/g, 'and')
+
+  // Replace all slashes (with or without spaces) with ' - ' to avoid lexer errors
+  cleaned = cleaned.replace(/\s*\/\s*/g, ' - ')
+
+  // Clean inside quotes: remove inner parentheses that might clash with node shape delimiters
+  cleaned = cleaned.replace(/(\[[^\]]*\]|\{[^}]*\})/g, (match) => {
+    return match.replace(/\(([^)]+)\)/g, '- $1')
+  })
+
+  // Convert old edge label syntax: A -- "text" --> B to standard A -->|text| B
+  cleaned = cleaned.replace(/--\s*"([^"]+)"\s*-->/g, '-->|$1|')
+  cleaned = cleaned.replace(/--\s*\|([^|]+)\|\s*-->/g, '-->|$1|')
+
+  cleaned = cleaned.trim()
+
+  if (!/^(flowchart|graph)\s+[A-Za-z]+/i.test(cleaned)) {
+    cleaned = `flowchart TD\n${cleaned}`
+  }
+
+  // Repair unclosed brackets line by line
+  const lines = cleaned.split('\n')
+  const fixedLines = lines.map((line) => {
+    let l = line.replace(/\s+$/, '')
+    if (l.includes('{"') && !l.includes('"}') && !l.includes('}}')) {
+      l = l + '"}'
+    } else if (l.includes('["') && !l.includes('"]') && !l.includes(']')) {
+      l = l + '"]'
+    } else if (l.includes('(("') && !l.includes('"))')) {
+      l = l + '"))'
+    }
+    return l
+  })
+
+  let joined = fixedLines.join('\n')
+  const subgraphs = (joined.match(/\bsubgraph\b/gi) || []).length
+  const ends = (joined.match(/\bend\b/gi) || []).length
+  if (subgraphs > ends) {
+    for (let i = 0; i < subgraphs - ends; i++) {
+      joined += '\n    end'
+    }
+  }
+
+  return joined
+}
+
+/**
+ * Extracts a simplified, foolproof Mermaid flowchart by stripping subgraphs
+ * and keeping pure node transitions as a zero-failure fallback.
+ */
+export function simplifyMermaidCode(raw) {
+  if (!raw) return 'flowchart TD\n    A["Start Process"] --> B["Complete"]'
+  const lines = raw.split('\n')
+  const keptLines = []
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed || /^subgraph\b/i.test(trimmed) || /^end$/i.test(trimmed)) {
+      continue
+    }
+    if (/^(flowchart|graph)\b/i.test(trimmed)) {
+      continue
+    }
+    if (trimmed.includes('-->') || trimmed.includes('---') || trimmed.includes('["') || trimmed.includes('{"')) {
+      let safeLine = trimmed.replace(/&/g, 'and').replace(/[<>{}]/g, (c) => (c === '{' || c === '}' ? c : ''))
+      keptLines.push(`    ${safeLine}`)
+    }
+  }
+  if (keptLines.length === 0) {
+    return 'flowchart TD\n    A["Start Process"] --> B["Execute Operations"] --> C["Complete"]'
+  }
+  return `flowchart TD\n${keptLines.join('\n')}`
+}
+
+/**
+ * Visual Flowchart Fallback component.
+ * Renders an interactive, connected node-and-arrow card flow if Mermaid SVG rendering fails,
+ * guaranteeing the user never sees raw text/code in place of a flowchart.
+ */
+export function VisualFlowchartFallback({ flowchart, cleanCode }) {
+  const [showCode, setShowCode] = useState(false)
+  const steps = flowchart?.steps_walkthrough || []
+  const phases = flowchart?.phases || []
+  const decisions = flowchart?.decision_points || []
+
+  return (
+    <div className="visual-flowchart-fallback">
+      <div className="visual-fallback-header">
+        <span className="visual-fallback-badge">🗺️ Visual Workflow Flowchart</span>
+        <button
+          type="button"
+          className="toolbar-btn"
+          onClick={() => setShowCode(!showCode)}
+        >
+          {showCode ? '🖼️ View Visual Graph' : '💻 View Markdown Code'}
+        </button>
+      </div>
+
+      {showCode ? (
+        <pre className="mermaid-code-view">
+          <code>{cleanCode}</code>
+        </pre>
+      ) : (
+        <div className="visual-flow-nodes-container">
+          {phases.length > 0 ? (
+            phases.map((phase, pIdx) => {
+              const phaseSteps = steps.filter((s) => s.phase === phase.title || (phase.node_ids && phase.node_ids.includes(s.component)))
+              const displaySteps = phaseSteps.length > 0 ? phaseSteps : steps.slice(pIdx * 2, pIdx * 2 + 2)
+              return (
+                <div key={phase.phase_id || pIdx} className="visual-flow-phase-group">
+                  <div className="visual-phase-title-pill">
+                    📂 {phase.title}
+                  </div>
+                  <div className="visual-phase-nodes">
+                    {displaySteps.map((step, sIdx) => (
+                      <div key={sIdx} className="visual-flow-step-wrapper">
+                        <div className="visual-flow-card">
+                          <div className="flow-card-header">
+                            <span className="flow-step-num">Step {step.step || sIdx + 1}</span>
+                            <span className="flow-comp-tag">{step.component}</span>
+                          </div>
+                          <p className="flow-action-text">{step.action}</p>
+                        </div>
+                        {sIdx < displaySteps.length - 1 && (
+                          <div className="visual-flow-connector">
+                            <span className="connector-line" />
+                            <span className="connector-arrow">↓</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {pIdx < phases.length - 1 && (
+                    <div className="phase-transition-arrow">
+                      <span className="phase-arrow-line" />
+                      <span className="phase-arrow-badge">Next Phase ↓</span>
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          ) : steps.length > 0 ? (
+            <div className="visual-phase-nodes">
+              {steps.map((step, sIdx) => (
+                <div key={sIdx} className="visual-flow-step-wrapper">
+                  <div className="visual-flow-card">
+                    <div className="flow-card-header">
+                      <span className="flow-step-num">Step {step.step || sIdx + 1}</span>
+                      <span className="flow-comp-tag">{step.component}</span>
+                    </div>
+                    <p className="flow-action-text">{step.action}</p>
+                  </div>
+                  {sIdx < steps.length - 1 && (
+                    <div className="visual-flow-connector">
+                      <span className="connector-line" />
+                      <span className="connector-arrow">↓</span>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="empty-flow-text">Flowchart workflow nodes generated successfully.</p>
+          )}
+
+          {decisions.length > 0 && (
+            <div className="visual-fallback-decisions">
+              <span className="decisions-section-title">⚖️ Key Decision Gates</span>
+              <div className="decisions-mini-grid">
+                {decisions.map((dp, dIdx) => (
+                  <div key={dIdx} className="decision-mini-card">
+                    <strong>{dp.condition}</strong>
+                    <div className="decision-mini-outcomes">
+                      <span className="outcome-pill outcome-pill--yes">✔ {dp.outcome_yes}</span>
+                      <span className="outcome-pill outcome-pill--no">✖ {dp.outcome_no}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Dedicated Mermaid Diagram renderer component.
+ * Parses and renders Markdown Mermaid syntax into interactive SVGs with zoom controls.
+ */
+export function MermaidDiagram({ code, fallbackData }) {
   const containerRef = useRef(null)
   const [svgHtml, setSvgHtml] = useState('')
   const [renderError, setRenderError] = useState(null)
   const [copied, setCopied] = useState(false)
   const [showCode, setShowCode] = useState(false)
+  const [zoom, setZoom] = useState(1.0)
 
-  // Clean code from markdown code fences and strip XML/HTML tags
-  const cleanCode = (code || '')
-    .replace(/^```mermaid\s*/i, '')
-    .replace(/```\s*$/, '')
-    .replace(/<[^>]+>/g, '')
-    .trim()
+  // Clean and sanitize diagram code
+  const cleanCode = sanitizeMermaidCode(code)
 
   useEffect(() => {
     let isCancelled = false
     if (!cleanCode) return
 
     const renderDiagram = async () => {
-      const uniqueId = `mermaid_${Math.random().toString(36).substring(2, 10)}`
+      // Alphanumeric ID starting with letter
+      const uniqueId = `mermaid_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`
+      
+      // Create isolated invisible render container
+      const tempContainer = document.createElement('div')
+      tempContainer.id = `temp_${uniqueId}`
+      tempContainer.style.position = 'absolute'
+      tempContainer.style.visibility = 'hidden'
+      tempContainer.style.top = '-9999px'
+      document.body.appendChild(tempContainer)
+
       try {
-        // Clean any stray error elements inserted by Mermaid into document body
-        document.querySelectorAll('.error-icon, [id^="dmermaid_"]').forEach((el) => el.remove())
-        const { svg } = await mermaid.render(uniqueId, cleanCode)
+        const { svg } = await mermaid.render(uniqueId, cleanCode, tempContainer)
         if (!isCancelled) {
           setSvgHtml(svg)
           setRenderError(null)
         }
       } catch (err) {
-        document.querySelectorAll('.error-icon, [id^="dmermaid_"]').forEach((el) => el.remove())
-        if (!isCancelled) {
-          console.warn('Mermaid rendering notice:', err)
-          setRenderError(err.message || 'Error parsing diagram syntax')
+        // Retry with simplified representation (no subgraphs) before falling back
+        try {
+          const simplifiedCode = simplifyMermaidCode(cleanCode)
+          const fallbackId = `${uniqueId}_fb`
+          const { svg: fbSvg } = await mermaid.render(fallbackId, simplifiedCode, tempContainer)
+          if (!isCancelled) {
+            setSvgHtml(fbSvg)
+            setRenderError(null)
+          }
+        } catch (fallbackErr) {
+          if (!isCancelled) {
+            console.warn('Mermaid rendering notice:', err)
+            setRenderError(err.message || 'Error parsing diagram syntax')
+          }
+        }
+      } finally {
+        if (tempContainer.parentNode) {
+          tempContainer.parentNode.removeChild(tempContainer)
         }
       }
     }
@@ -69,11 +293,52 @@ export function MermaidDiagram({ code }) {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  function handleZoomIn() {
+    setZoom((z) => Math.min(+(z + 0.15).toFixed(2), 1.8))
+  }
+
+  function handleZoomOut() {
+    setZoom((z) => Math.max(+(z - 0.15).toFixed(2), 0.5))
+  }
+
+  function handleZoomReset() {
+    setZoom(1.0)
+  }
+
   return (
     <div className="mermaid-diagram-wrap">
       <div className="mermaid-diagram-wrap__toolbar">
         <span className="mermaid-toolbar__badge">📊 Mermaid Flowchart</span>
         <div className="mermaid-toolbar__actions">
+          {!showCode && !renderError && (
+            <div className="mermaid-zoom-controls">
+              <button
+                type="button"
+                className="toolbar-btn zoom-btn"
+                onClick={handleZoomOut}
+                title="Zoom Out"
+              >
+                −
+              </button>
+              <span className="zoom-level-badge">{Math.round(zoom * 100)}%</span>
+              <button
+                type="button"
+                className="toolbar-btn zoom-btn"
+                onClick={handleZoomIn}
+                title="Zoom In"
+              >
+                +
+              </button>
+              <button
+                type="button"
+                className="toolbar-btn zoom-btn"
+                onClick={handleZoomReset}
+                title="Reset Zoom"
+              >
+                ↺
+              </button>
+            </div>
+          )}
           <button
             type="button"
             className="toolbar-btn"
@@ -98,18 +363,26 @@ export function MermaidDiagram({ code }) {
           <code>{cleanCode}</code>
         </pre>
       ) : renderError ? (
-        <div className="mermaid-error-fallback">
-          <p className="mermaid-error-text">⚠️ <em>Diagram rendered in text mode:</em></p>
-          <pre className="mermaid-code-view">
-            <code>{cleanCode}</code>
-          </pre>
-        </div>
+        <VisualFlowchartFallback flowchart={fallbackData} cleanCode={cleanCode} />
       ) : (
         <div
           ref={containerRef}
           className="mermaid-svg-container"
-          dangerouslySetInnerHTML={{ __html: svgHtml }}
-        />
+        >
+          <div
+            className="mermaid-svg-viewport"
+            style={{
+              transform: `scale(${zoom})`,
+              transformOrigin: 'top center',
+              transition: 'transform 0.15s ease',
+              width: '100%',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+            }}
+            dangerouslySetInnerHTML={{ __html: svgHtml }}
+          />
+        </div>
       )}
     </div>
   )
@@ -191,7 +464,7 @@ export function FlowchartWidget({ flowchart }) {
       {/* Tab Panels */}
       <div className="flowchart-tab-content">
         {activeTab === 'diagram' && (
-          <MermaidDiagram code={mermaid_markdown} />
+          <MermaidDiagram code={mermaid_markdown} fallbackData={flowchart} />
         )}
 
         {activeTab === 'walkthrough' && (

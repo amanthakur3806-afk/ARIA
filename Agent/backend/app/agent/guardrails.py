@@ -38,7 +38,7 @@ logger = logging.getLogger("aria.guardrails")
 ANSWER_POLICY_MODE = "Strict"
 
 # Retrieval score threshold (calibrated for normalized saturated TF-IDF)
-RAG_MIN_SCORE: float = float(os.getenv("RAG_MIN_SCORE", "0.20"))
+RAG_MIN_SCORE: float = float(os.getenv("RAG_MIN_SCORE", "0.15"))
 DEFAULT_TOP_K: int = int(os.getenv("RAG_TOP_K", "4"))
 
 # Input validation limits
@@ -363,8 +363,9 @@ Your highest priority is accuracy, safety, and strict factual grounding in the s
 
 CRITICAL OPERATIONAL RULES:
 1. STRICT DOCUMENT GROUNDING:
-   - Answer student questions ONLY using facts directly stated in the provided <context> blocks.
-   - If the provided <context> does not contain sufficient facts to answer the question, state:
+   - Answer student questions using facts directly stated in the provided <context> blocks.
+   - For summary, overview, explanation, or concept questions about the student's materials, synthesize and explain the retrieved notes thoroughly, pedagogically, and accurately based on the provided <context>. Always cite the relevant [Source X] chunks.
+   - If the question asks about specific facts, pass marks, grades, or topics that are absent from the provided <context>, state:
      "I could not find information to answer this question in your uploaded documents. Please check your course materials or upload relevant notes."
    - Do NOT speculate, extrapolate, or introduce external unverified knowledge.
 

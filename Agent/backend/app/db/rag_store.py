@@ -311,7 +311,33 @@ class UserScopedRagStore:
 
         retriever = BasicRetriever()
         retriever.index_chunks(candidates)
-        return retriever.retrieve(query=query, top_k=top_k)
+        matched_chunks, scores, retrieval_latency_ms = retriever.retrieve(query=query, top_k=top_k)
+
+        # Cross-session fallback: If session filter was applied and yielded nothing or score < 0.15,
+        # search across ALL documents owned by this verified Clerk user
+        if session_id is not None and (not matched_chunks or (scores and max(scores) < 0.15)):
+            with self._lock:
+                all_user_candidates = list(self._chunks_by_user.get(user_id, []))
+            if all_user_candidates and len(all_user_candidates) != len(candidates):
+                retriever_all = BasicRetriever()
+                retriever_all.index_chunks(all_user_candidates)
+                m_all, s_all, _ = retriever_all.retrieve(query=query, top_k=top_k)
+                if m_all and s_all and max(s_all) >= 0.15:
+                    matched_chunks, scores = m_all, s_all
+
+        # Curriculum fallback: If allow_curriculum_fallback is True and user chunks yielded no match,
+        # search default curriculum
+        if allow_curriculum_fallback and (not matched_chunks or (scores and max(scores) < 0.15)):
+            with self._lock:
+                curr_candidates = list(self._chunks_by_user.get("default_curriculum", []))
+            if curr_candidates:
+                retriever_curr = BasicRetriever()
+                retriever_curr.index_chunks(curr_candidates)
+                m_curr, s_curr, _ = retriever_curr.retrieve(query=query, top_k=top_k)
+                if m_curr and s_curr and max(s_curr) >= 0.15:
+                    matched_chunks, scores = m_curr, s_curr
+
+        return matched_chunks, scores, retrieval_latency_ms
 
     # ------------------------------------------------------------------
     # Query Helpers & Metadata

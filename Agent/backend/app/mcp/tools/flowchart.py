@@ -90,6 +90,111 @@ class FlowchartResult:
         return json.dumps(self.to_dict(), indent=indent)
 
 
+def clean_topic_title(raw_topic: str) -> str:
+    """Strips conversational query artifacts to isolate the clean academic topic."""
+    if not raw_topic:
+        return "Process Architecture"
+    cleaned = raw_topic.strip()
+    # Strip polite openings, command verbs, typos (e.g. genrate), and request prefixes
+    cleaned = re.sub(
+        r'^(?:please\s+)?(?:can\s+you\s+)?(?:create|make|generate|genrate|draw|show|build|give\s+me|provide|design)\s+(?:a\s+|an\s+)?(?:flow\s*chart|flowchart|workflow|diagram|architecture|process|map)\s+(?:for|of|about|on|explaining|showing)?\s*(?:topic\s*)?',
+        '',
+        cleaned,
+        flags=re.IGNORECASE
+    ).strip()
+    cleaned = re.sub(
+        r'^(?:flow\s*chart|flowchart|diagram|workflow)\s+(?:for|of|about|on|explaining|showing)?\s*(?:topic\s*)?',
+        '',
+        cleaned,
+        flags=re.IGNORECASE
+    ).strip()
+    cleaned = re.sub(r'^(?:explaining|showing|about|for\s+topic|for|topic)\s+', '', cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r'[?!.,;:]+$', '', cleaned).strip()
+    if cleaned.lower() == "mcp":
+        return "MCP (Model Context Protocol)"
+    return cleaned.title() if cleaned else "Process Architecture"
+
+
+def extract_flowchart_metadata(mermaid_text: str, topic: str = "Topic") -> Dict[str, Any]:
+    """Extracts chronological steps, components, decision points, and phases directly from Mermaid code."""
+    clean = mermaid_text.replace("```mermaid", "").replace("```", "").strip()
+
+    # 1. Subgraphs / Phases
+    phases = []
+    sg_matches = re.finditer(r'subgraph\s+([A-Za-z0-9_-]+)\s*(?:\[\"?([^\"]+?)\"?\])?([\s\S]*?)end', clean)
+    for m in sg_matches:
+        sg_id = m.group(1)
+        sg_title = m.group(2) or sg_id.replace("_", " ").title()
+        sg_body = m.group(3)
+        node_ids = re.findall(r'([A-Za-z0-9_-]+)(?:\s*\[|\s*\{|\s*\()', sg_body)
+        phases.append({
+            "phase_id": sg_id,
+            "title": sg_title,
+            "node_ids": list(dict.fromkeys(node_ids))
+        })
+
+    # 2. Extract discrete nodes with labels
+    node_map = {}
+    node_matches = re.findall(r'([A-Za-z0-9_-]+)\s*(?:\[\(\"([^\"]+)\"\)\]|\[\"([^\"]+)\"\]|\{\"([^\"]+)\"\}|\(\"([^\"]+)\"\))', clean)
+    for nm in node_matches:
+        nid = nm[0]
+        label = nm[1] or nm[2] or nm[3] or nm[4]
+        if nid not in node_map and label:
+            node_map[nid] = label
+
+    # 3. Steps walkthrough in node occurrence order
+    steps = []
+    for idx, (nid, label) in enumerate(node_map.items(), 1):
+        parent_phase = "Execution Flow"
+        for p in phases:
+            if nid in p["node_ids"]:
+                parent_phase = p["title"]
+                break
+        steps.append({
+            "step": idx,
+            "phase": parent_phase,
+            "component": f"{nid}",
+            "action": label
+        })
+
+    # 4. Decision points
+    decisions = []
+    decision_matches = re.findall(r'([A-Za-z0-9_-]+)\s*\{\"([^\"]+)\"\}', clean)
+    for did, dcond in decision_matches:
+        yes_match = re.search(rf'{did}\s*-->\s*\|(?:Yes|True|Valid)\|[ ]*([A-Za-z0-9_-]+)', clean, re.IGNORECASE)
+        no_match = re.search(rf'{did}\s*-->\s*\|(?:No|False|Invalid)\|[ ]*([A-Za-z0-9_-]+)', clean, re.IGNORECASE)
+        y_target = node_map.get(yes_match.group(1), "Proceed to next execution stage") if yes_match else "Proceed to next stage"
+        n_target = node_map.get(no_match.group(1), "Handle exception or alternative state") if no_match else "Handle exception"
+        decisions.append({
+            "condition": dcond,
+            "outcome_yes": y_target,
+            "outcome_no": n_target
+        })
+
+    # 5. Components
+    components = []
+    if phases:
+        for p in phases:
+            components.append({
+                "name": p["title"],
+                "role": "Execution Subsystem",
+                "details": f"Coordinates {len(p['node_ids'])} operation(s) in {topic}."
+            })
+    else:
+        components.append({
+            "name": f"{topic} Core Engine",
+            "role": "Primary Controller",
+            "details": f"Coordinates computational logic and state transitions for {topic}."
+        })
+
+    return {
+        "steps_walkthrough": steps,
+        "phases": phases,
+        "decision_points": decisions,
+        "components": components
+    }
+
+
 class FlowchartGeneratorTool:
     """
     Flowchart Generator Tool Implementation.
@@ -146,10 +251,58 @@ class FlowchartGeneratorTool:
         """Sanitizes text for safe inclusion inside Mermaid node brackets."""
         # Strip XML/HTML tags
         cleaned = re.sub(r'<[^>]+>', '', label)
+        # Replace & with and, / with -
+        cleaned = cleaned.replace('&', 'and').replace('/', ' - ')
         # Remove quotes, newlines, backslashes, brackets, and characters that break Mermaid syntax
         cleaned = cleaned.replace('"', "'").replace("\n", " ").replace("\\", "").strip()
         cleaned = re.sub(r'[\(\)\[\]\{\}<>]', '', cleaned)
         return cleaned
+
+    def _repair_mermaid_syntax(self, mermaid_code: str, orientation: str = "TD") -> str:
+        """Repairs truncated or malformed Mermaid markdown code."""
+        if not mermaid_code:
+            return f"```mermaid\nflowchart {orientation}\n    A[\"Start\"] --> B[\"Process\"]\n```"
+
+        code = mermaid_code.strip()
+        if code.startswith("```mermaid"):
+            code = code[len("```mermaid"):].strip()
+        elif code.startswith("```"):
+            code = code[len("```"):].strip()
+        if code.endswith("```"):
+            code = code[:-3].strip()
+
+        # Unescape escaped characters and backslashes
+        code = code.replace('\\"', '"').replace('\\n', '\n').replace('\\', '')
+        # Replace & with and to protect parser
+        code = code.replace(' & ', ' and ').replace('&', ' and ')
+        # Replace slashes in text
+        code = re.sub(r'(?<=\w)/(?=\w)', ' - ', code)
+
+        # Ensure flowchart or graph declaration
+        if not re.search(r'^(?:flowchart|graph)\s+[A-Za-z]+', code, flags=re.MULTILINE):
+            code = f"flowchart {orientation}\n" + code
+
+        # Close any unclosed node brackets
+        lines = code.split("\n")
+        fixed_lines = []
+        for line in lines:
+            l = line
+            if '{"' in l and '"}' not in l and '}}' not in l:
+                l = l.rstrip() + '"}'
+            elif '["' in l and '"]' not in l and ']' not in l:
+                l = l.rstrip() + '"]'
+            elif '(("' in l and '"))' not in l:
+                l = l.rstrip() + '"))'
+            fixed_lines.append(l)
+
+        joined = "\n".join(fixed_lines)
+        subgraph_count = len(re.findall(r'\bsubgraph\b', joined, flags=re.IGNORECASE))
+        end_count = len(re.findall(r'\bend\b', joined, flags=re.IGNORECASE))
+        if subgraph_count > end_count:
+            for _ in range(subgraph_count - end_count):
+                joined += "\n    end"
+
+        return f"```mermaid\n{joined}\n```"
 
     def _get_curated_blueprint(self, topic: str, orientation: str = "TD") -> Optional[Dict[str, Any]]:
         """
@@ -163,25 +316,25 @@ class FlowchartGeneratorTool:
             mermaid = f"""```mermaid
 flowchart {orientation}
     subgraph Ingestion_Phase ["Phase 1: Knowledge Ingestion"]
-        A["Raw Documents / Notes"] --> B["Document Chunking (Sentence Aware)"]
-        B --> C["Embedding Model (Vector Encoding)"]
-        C --> D[("Vector Database (Chroma / Index)")]
+        A["Raw Documents and Notes"] --> B["Document Chunking - Sentence Aware"]
+        B --> C["Embedding Model - Vector Encoding"]
+        C --> D[("Vector Database - Chroma Index")]
     end
 
     subgraph Retrieval_Phase ["Phase 2: Semantic Retrieval"]
         E["Student Submits Query"] --> F["Generate Query Embedding"]
-        F --> G["Vector Similarity Search (Cosine / HNSW)"]
+        F --> G["Vector Similarity Search - Cosine or HNSW"]
         D -.-> G
-        G --> H{{"Sufficient Relevance? (Score > Threshold)"}}
-        H -- "Yes" --> I["Top-K Relevant Chunks Selected"]
-        H -- "No" --> J["Query Expansion / Semantic Fallback"]
+        G --> H{{"Sufficient Relevance - Score above Threshold?"}}
+        H -->|Yes| I["Top-K Relevant Chunks Selected"]
+        H -->|No| J["Query Expansion or Fallback"]
         J --> G
     end
 
     subgraph Generation_Phase ["Phase 3: Augmented Generation"]
         I --> K["Prompt Synthesis Engine"]
-        E -. "Original Query" .-> K
-        K --> L["LLM (Context + Instructions)"]
+        E -.->|Original Query| K
+        K --> L["LLM - Context and Instructions"]
         L --> M["Grounded Answer with Source Citations"]
         M --> N["Student UI Display"]
     end
@@ -247,23 +400,23 @@ flowchart {orientation}
         if any(w in t_lower for w in ["virtual memory", "paging", "page fault", "tlb"]):
             mermaid = f"""```mermaid
 flowchart {orientation}
-    A["CPU Issues Logical / Virtual Address"] --> B["Extract VPN (Virtual Page Number) & Offset"]
+    A["CPU Issues Logical or Virtual Address"] --> B["Extract VPN and Offset"]
     B --> C{{"TLB Cache Lookup"}}
     
-    C -- "TLB Hit (Fast Path)" --> D["Retrieve Physical Frame Number (PFN)"]
-    D --> E["Calculate Physical Address: PFN + Offset"]
+    C -->|TLB Hit - Fast Path| D["Retrieve Physical Frame Number"]
+    D --> E["Calculate Physical Address: PFN plus Offset"]
     E --> F["Access Physical RAM"]
     
-    C -- "TLB Miss (Slow Path)" --> G["Page Table Walk (CR3 Base Register)"]
-    G --> H{{"Present Bit == 1 in Page Table?"}}
+    C -->|TLB Miss - Slow Path| G["Page Table Walk - CR3 Register"]
+    G --> H{{"Present Bit equals 1 in Page Table?"}}
     
-    H -- "Yes (In Memory)" --> I["Update TLB with Mapping"]
+    H -->|Yes - In Memory| I["Update TLB with Mapping"]
     I --> D
     
-    H -- "No (Page Fault Trap)" --> J["Hardware Interrupt: Page Fault Exception"]
+    H -->|No - Page Fault| J["Hardware Interrupt: Page Fault Exception"]
     J --> K["OS Trap Handler: Allocate Free Frame"]
-    K --> L["Read Page from Secondary Storage (Disk/SSD)"]
-    L --> M["Update Page Table Entry (Set Present Bit = 1)"]
+    K --> L["Read Page from Secondary Storage"]
+    L --> M["Update Page Table Entry - Set Present Bit"]
     M --> I
 ```"""
             return {
@@ -297,20 +450,20 @@ flowchart {orientation}
 flowchart {orientation}
     A["Process Requests Resource R"] --> B{{"Resource Currently Available?"}}
     
-    B -- "Yes" --> C["Allocate Resource to Process"]
+    B -->|Yes| C["Allocate Resource to Process"]
     C --> D["Process Enters Critical Section"]
-    D --> E["Release Resource & Signal Waiters"]
+    D --> E["Release Resource and Signal Waiters"]
     
-    B -- "No" --> F["Process Enters Waiting State (Hold and Wait)"]
+    B -->|No| F["Process Enters Waiting State - Hold and Wait"]
     F --> G{{"All 4 Coffman Conditions Active?"}}
     
-    G -- "Yes: Mutual Exclusion + Hold&Wait + No Preemption + Circular Wait" --> H["DEADLOCK STATE OCCURS"]
+    G -->|Yes: Coffman Cycle Formed| H["DEADLOCK STATE OCCURS"]
     H --> I["Deadlock Handling Strategy"]
-    I --> J["Option 1: Deadlock Prevention (Break 1 Condition)"]
-    I --> K["Option 2: Banker's Algorithm (Avoidance / Safe State Check)"]
-    I --> L["Option 3: Detection & Recovery (Process Preemption / Kill)"]
+    I --> J["Option 1: Deadlock Prevention - Break 1 Condition"]
+    I --> K["Option 2: Bankers Algorithm - Safe State Check"]
+    I --> L["Option 3: Detection and Recovery - Preempt or Kill"]
     
-    G -- "No" --> M["Process Waits until Resource Released"]
+    G -->|No| M["Process Waits until Resource Released"]
     M --> B
 ```"""
             return {
@@ -333,6 +486,58 @@ flowchart {orientation}
                 "phases": [
                     {"phase_id": "allocation", "title": "Allocation Flow", "node_ids": ["A", "B", "C", "D", "E"]},
                     {"phase_id": "deadlock", "title": "Deadlock Analysis", "node_ids": ["F", "G", "H", "I", "J", "K", "L"]}
+                ]
+            }
+
+        # 4. MCP (Model Context Protocol) Architecture Blueprint
+        if any(w in t_lower for w in ["mcp", "model context protocol", "model context", "context protocol"]):
+            mermaid = f"""```mermaid
+flowchart {orientation}
+    subgraph Host_Layer ["Phase 1: Host Application and Client Layer"]
+        A["LLM Agent Runtime - ARIA"] --> B["MCP Client - Transport Manager"]
+    end
+
+    subgraph Protocol_Layer ["Phase 2: Protocol Exchange - JSON-RPC 2.0"]
+        B --> C["JSON-RPC Request - tools call"]
+        C --> D["Standard IO or SSE Transport Channel"]
+    end
+
+    subgraph Server_Execution ["Phase 3: FastMCP Server Execution"]
+        D --> E{{"Tool Lookup and Sandbox Check"}}
+        E -->|Authorized| F["Execute Deterministic Tool Function"]
+        E -->|Unauthorized| G["Permission Denied or Error Trap"]
+        F --> H["Format Structured JSON-RPC Response"]
+    end
+
+    subgraph Synthesis_Layer ["Phase 4: Output Synthesis and Rendering"]
+        H --> I["Deliver Structured Tool Output to Agent State"]
+        I --> J["Agent Synthesizes Grounded Pedagogical UI"]
+    end
+```"""
+            return {
+                "title": "Model Context Protocol (MCP) Architectural Workflow",
+                "mermaid_markdown": mermaid,
+                "steps_walkthrough": [
+                    {"step": 1, "phase": "Host Application", "component": "LLM Agent Runtime", "action": "Agent evaluates user request and determines MCP tool invocation requirements."},
+                    {"step": 2, "phase": "Client Layer", "component": "MCP Client", "action": "Encapsulates request payload and parameters into standard JSON-RPC 2.0 format."},
+                    {"step": 3, "phase": "Protocol Layer", "component": "Transport Channel", "action": "Streams JSON-RPC message over standard I/O (stdio) or Server-Sent Events (SSE)."},
+                    {"step": 4, "phase": "Server Gate", "component": "FastMCP Registry", "action": "Validates tool permissions, parameter schema, and boundary conditions."},
+                    {"step": 5, "phase": "Execution", "component": "Tool Sandbox", "action": "Executes target Python routine (e.g. Flowchart, Planner, RAG) with isolated state."},
+                    {"step": 6, "phase": "Delivery", "component": "Response Dispatcher", "action": "Returns structured JSON output for state synthesis and interactive widget mounting."}
+                ],
+                "components": [
+                    {"name": "Host Application (ARIA)", "role": "Cognitive Coordinator", "details": "Initiates intent routing, parameter binding, and response streaming."},
+                    {"name": "MCP Client", "role": "Transport Manager", "details": "Maintains persistent session, capability negotiation, and JSON-RPC framing."},
+                    {"name": "FastMCP Server", "role": "Tool Provider", "details": "Hosts secure, isolated tools and exposes standardized schemas over stdio/SSE."}
+                ],
+                "decision_points": [
+                    {"condition": "Tool Lookup and Security Authorization", "outcome_yes": "Execute tool function in isolated sandbox", "outcome_no": "Emit permission denied or validation error"}
+                ],
+                "phases": [
+                    {"phase_id": "host_layer", "title": "Host Application and Client Layer", "node_ids": ["A", "B"]},
+                    {"phase_id": "protocol_layer", "title": "Protocol Exchange - JSON-RPC 2.0", "node_ids": ["C", "D"]},
+                    {"phase_id": "server_execution", "title": "FastMCP Server Execution", "node_ids": ["E", "F", "G", "H"]},
+                    {"phase_id": "synthesis_layer", "title": "Output Synthesis and Rendering", "node_ids": ["I", "J"]}
                 ]
             }
 
@@ -375,63 +580,56 @@ flowchart {orientation}
         # Fallback default workflow stages if context is sparse
         if len(sentences) < 4:
             sentences = [
-                f"Initialize and configure {clean_topic} parameters and prerequisites.",
-                f"Validate input requests and establish verified boundary conditions.",
-                f"Execute core computational logic and coordinate subsystem handoffs.",
-                f"Evaluate status conditions and perform verification checks.",
-                f"Finalize execution state and deliver synthesized output."
+                f"Client submits execution or query request to {clean_topic}.",
+                f"Gatekeeper validates parameters, authentication, and boundary conditions.",
+                f"Core engine processes task and coordinates subsystem pipeline.",
+                f"System verifies output integrity and applies state consistency checks.",
+                f"Response dispatcher formats and returns final result to client."
             ]
 
-        # Build Mermaid graph
-        nodes: List[Dict[str, str]] = []
-        edges: List[str] = []
-        steps: List[Dict[str, Any]] = []
+        # Assemble Mermaid text with subgraphs and decision branch
+        mermaid_code = (
+            f"```mermaid\n"
+            f"flowchart {orientation}\n"
+            f'    subgraph Ingestion_Stage ["Stage 1: Request Ingestion"]\n'
+            f'        A["Client - Input Trigger"] --> B["Parameter Parsing and Sanitization"]\n'
+            f'    end\n\n'
+            f'    subgraph Processing_Stage ["Stage 2: Core {clean_topic} Pipeline"]\n'
+            f'        B --> C{{"Boundary and Invariant Check"}}\n'
+            f'        C -->|Valid| D["Core State Transition and Logic"]\n'
+            f'        C -->|Invalid| E["Exception Handling and Rollback"]\n'
+            f'        D --> F["Subsystem Synchronization"]\n'
+            f'    end\n\n'
+            f'    subgraph Output_Stage ["Stage 3: Result Delivery"]\n'
+            f'        F --> G["Final State Verification and Response Dispatch"]\n'
+            f'    end\n'
+            f"```"
+        )
 
-        node_letters = ["A", "B", "C", "D", "E", "F", "G", "H"]
-        for idx, sent in enumerate(sentences[:6]):
-            nid = node_letters[idx] if idx < len(node_letters) else f"N{idx+1}"
-            label_text = sent[:45] + ("..." if len(sent) > 45 else "")
-            safe_label = self._sanitize_label(label_text)
-            
-            # Identify if sentence looks like a decision
-            is_decision = any(w in sent.lower() for w in ["if", "check", "whether", "verify", "decision"])
-            if is_decision:
-                nodes.append({"id": nid, "code": f'{nid}{{"{safe_label}"}}'})
-            else:
-                nodes.append({"id": nid, "code": f'{nid}["{safe_label}"]'})
-
-            steps.append({
-                "step": idx + 1,
-                "phase": f"Stage {idx + 1}",
-                "component": f"Step {idx + 1}",
-                "action": sent
-            })
-
-            if idx > 0:
-                prev_id = nodes[idx - 1]["id"]
-                edges.append(f"    {prev_id} --> {nid}")
-
-        # Assemble Mermaid text
-        mermaid_lines = [f"```mermaid\nflowchart {orientation}"]
-        for n in nodes:
-            mermaid_lines.append(f"    {n['code']}")
-        mermaid_lines.extend(edges)
-        mermaid_lines.append("```")
-        mermaid_code = "\n".join(mermaid_lines)
+        steps = [
+            {"step": 1, "phase": "Ingestion", "component": "Input Trigger", "action": f"Client initiates request and parameters are parsed for {clean_topic}."},
+            {"step": 2, "phase": "Validation", "component": "Verification Gate", "action": "Validates boundary constraints and preconditions before execution."},
+            {"step": 3, "phase": "Core Processing", "component": f"{clean_topic} Engine", "action": "Executes primary state transitions, logic algorithms, and handoffs."},
+            {"step": 4, "phase": "Synchronization", "component": "State Coordinator", "action": "Ensures memory isolation, subsystem consistency, and data integrity."},
+            {"step": 5, "phase": "Delivery", "component": "Response Dispatcher", "action": "Formats final verified execution state and completes the workflow."}
+        ]
 
         return {
-            "title": f"{clean_topic} Process Flow & Component Architecture",
+            "title": f"{clean_topic} Architectural Workflow & Execution Pipeline",
             "mermaid_markdown": mermaid_code,
             "steps_walkthrough": steps,
             "components": [
-                {"name": f"{clean_topic} Core", "role": "Primary Engine", "details": f"Coordinates end-to-end flow for {clean_topic}."},
-                {"name": "Verification Gate", "role": "Integrity Check", "details": "Ensures all preconditions and invariants are satisfied before next stage."}
+                {"name": f"{clean_topic} Engine", "role": "Primary Processor", "details": f"Coordinates computational logic and state transitions for {clean_topic}."},
+                {"name": "Verification Gate", "role": "Integrity Check", "details": "Ensures all preconditions and security boundaries are satisfied."},
+                {"name": "State Coordinator", "role": "Subsystem Sync", "details": "Manages resource isolation and cross-component consistency."}
             ],
             "decision_points": [
-                {"condition": "Precondition Check", "outcome_yes": "Proceed to execution stage", "outcome_no": "Re-evaluate inputs or handle exception."}
+                {"condition": "Boundary & Invariant Check", "outcome_yes": "Proceed to core execution pipeline", "outcome_no": "Trigger exception handler and safe rollback"}
             ],
             "phases": [
-                {"phase_id": "execution_flow", "title": "Execution Pipeline", "node_ids": [n["id"] for n in nodes]}
+                {"phase_id": "ingestion", "title": "Request Ingestion", "node_ids": ["A", "B"]},
+                {"phase_id": "processing", "title": "Core Pipeline", "node_ids": ["C", "D", "E", "F"]},
+                {"phase_id": "output", "title": "Result Delivery", "node_ids": ["G"]}
             ]
         }
 
@@ -444,12 +642,12 @@ flowchart {orientation}
     ) -> Optional[Dict[str, Any]]:
         """
         Invokes LLM adapter to synthesize a rich, precise Mermaid flowchart
-        and step-by-step walkthrough, replacing missing context with deep LLM knowledge.
+        and automatically extracts walkthrough steps and decision points.
         """
         if not self.llm_adapter:
             return None
 
-        ctx_text = "\n---\n".join(context_chunks[:4]) if context_chunks else "No specific course notes provided."
+        ctx_text = "\n---\n".join(context_chunks[:3]) if context_chunks else "General academic knowledge context."
 
         prompt = (
             f"You are ARIA's Specialized Flowchart and Architecture Engine.\n"
@@ -458,30 +656,18 @@ flowchart {orientation}
             f"Requirements:\n"
             f"1. Generate valid, clean Mermaid markdown syntax (flowchart {orientation}).\n"
             f"2. Use subgraphs for distinct phases (e.g. Ingestion, Processing, Output).\n"
-            f"3. Use double quotes inside node brackets like: A[\"Node Label\"] or B{{\"Decision Query?\"}} to avoid syntax errors.\n"
-            f"4. Detail 'what happens when' across sequential steps.\n"
-            f"5. Identify key decision points with clear 'Yes' and 'No' branches.\n"
-            f"6. Output STRICTLY a valid JSON object with the following schema:\n"
+            f"3. Use double quotes inside node brackets like: A[\"Node Label\"] or B{{\"Decision Query?\"}}.\n"
+            f"4. Do NOT use '&' or '/' or unescaped symbols inside labels (use 'and', 'or', '-').\n"
+            f"5. Detail 'what happens when' across sequential steps with decision branches like: B -->|Yes| C.\n"
+            f"6. Output STRICTLY a valid, concise JSON object with schema:\n"
             f"{{\n"
             f'  "title": "Exact descriptive title of the flowchart",\n'
-            f'  "mermaid_markdown": "```mermaid\\nflowchart {orientation}\\n...\\n```",\n'
-            f'  "steps_walkthrough": [\n'
-            f'     {{"step": 1, "phase": "Phase Name", "component": "Component", "action": "What happens in this step"}}\n'
-            f'  ],\n'
-            f'  "components": [\n'
-            f'     {{"name": "Component Name", "role": "Its purpose", "details": "In-depth description"}}\n'
-            f'  ],\n'
-            f'  "decision_points": [\n'
-            f'     {{"condition": "Condition evaluated", "outcome_yes": "If true", "outcome_no": "If false"}}\n'
-            f'  ],\n'
-            f'  "phases": [\n'
-            f'     {{"phase_id": "p1", "title": "Phase Title", "node_ids": ["A", "B"]}}\n'
-            f'  ]\n'
+            f'  "mermaid_markdown": "```mermaid\\nflowchart {orientation}\\n...\\n```"\n'
             f"}}"
         )
 
         try:
-            raw_response = self.llm_adapter(prompt, {"temperature": 0.2})
+            raw_response = self.llm_adapter(prompt, {"temperature": 0.2, "max_tokens": 700})
             if not raw_response or not raw_response.strip():
                 return None
 
@@ -492,43 +678,42 @@ flowchart {orientation}
             elif "```" in json_text:
                 json_text = json_text.split("```")[1].split("```")[0].strip()
 
+            raw_mermaid = ""
+            extracted_title = f"{topic} Architecture Flow"
+
             try:
                 parsed = json.loads(json_text)
                 if "mermaid_markdown" in parsed:
-                    mm = str(parsed["mermaid_markdown"]).strip()
-                    if not mm.startswith("```"):
-                        parsed["mermaid_markdown"] = f"```mermaid\n{mm}\n```"
-                    if "steps_walkthrough" not in parsed:
-                        parsed["steps_walkthrough"] = []
-                    return parsed
+                    raw_mermaid = str(parsed["mermaid_markdown"]).strip()
+                if "title" in parsed and parsed["title"]:
+                    extracted_title = str(parsed["title"]).strip()
             except Exception:
                 pass
 
-            # Resilient fallback extraction if JSON was truncated or malformed
-            if "flowchart" in raw_response or "graph " in raw_response:
-                m_match = re.search(r'((?:flowchart|graph)\s+[A-Za-z0-9_-]+[\s\S]+?)(?:```|\"}|$)', raw_response)
-                if m_match:
+            if not raw_mermaid:
+                m_match = re.search(r'((?:flowchart|graph)\s+(?:TD|LR|TB|BT|RL)[\s\S]+?)(?:```|\"}|$)', raw_response, flags=re.IGNORECASE)
+                if m_match and "-->" in m_match.group(1):
                     raw_mermaid = m_match.group(1).replace('\\n', '\n').replace('\\"', '"').strip()
-                    t_match = re.search(r'"title":\s*"([^"]+)"', raw_response)
-                    extracted_title = t_match.group(1) if t_match else f"{topic} Flowchart"
-                    return {
-                        "title": extracted_title,
-                        "mermaid_markdown": f"```mermaid\n{raw_mermaid}\n```",
-                        "steps_walkthrough": [
-                            {"step": 1, "phase": "Start", "component": "Initiator", "action": f"Initiate {topic} workflow and parse parameters."},
-                            {"step": 2, "phase": "Execution", "component": "Core Processor", "action": f"Execute state transitions and evaluate branch conditions for {topic}."},
-                            {"step": 3, "phase": "Completion", "component": "Resolver", "action": f"Finalize operations and output verified {topic} state."}
-                        ],
-                        "components": [
-                            {"name": f"{topic} Coordinator", "role": "Engine", "details": f"Coordinates end-to-end execution of {topic}."}
-                        ],
-                        "decision_points": [],
-                        "phases": []
-                    }
+                t_match = re.search(r'"title":\s*"([^"]+)"', raw_response)
+                if t_match and "Exact descriptive" not in t_match.group(1):
+                    extracted_title = t_match.group(1).strip()
+
+            if not raw_mermaid or "-->" not in raw_mermaid:
+                return None
+
+            repaired_mermaid = self._repair_mermaid_syntax(raw_mermaid, orientation=orientation)
+            meta = extract_flowchart_metadata(repaired_mermaid, topic=topic)
+
+            return {
+                "title": extracted_title,
+                "mermaid_markdown": repaired_mermaid,
+                "steps_walkthrough": meta["steps_walkthrough"],
+                "components": meta["components"],
+                "decision_points": meta["decision_points"],
+                "phases": meta["phases"]
+            }
         except Exception:
             return None
-
-        return None
 
     def run(
         self,
@@ -541,8 +726,10 @@ flowchart {orientation}
         Executes the flowchart generation workflow:
         1. Checks for curated academic blueprints.
         2. Queries LLM for dynamic, enriched flowchart if adapter available.
-        3. Falls back to sentence-boundary sequential synthesis.
+        3. Falls back to domain-aware sequential synthesis.
         """
+        clean_topic = clean_topic_title(topic)
+
         # Normalize text chunks
         raw_chunks: List[str] = []
         if context_chunks:
@@ -553,17 +740,17 @@ flowchart {orientation}
                     raw_chunks.append(c)
 
         # 1. Try curated blueprint first for highest educational precision
-        blueprint = self._get_curated_blueprint(topic, orientation=orientation)
+        blueprint = self._get_curated_blueprint(clean_topic, orientation=orientation)
 
-        # 2. Try LLM enrichment if no curated blueprint or if custom context provided
+        # 2. Try LLM enrichment if no curated blueprint
         llm_data: Optional[Dict[str, Any]] = None
         if not blueprint and self.llm_adapter:
-            llm_data = self._call_llm_flowchart(topic, raw_chunks, orientation, detail_level)
+            llm_data = self._call_llm_flowchart(clean_topic, raw_chunks, orientation, detail_level)
 
-        data = blueprint or llm_data or self._generate_generic_flowchart(topic, raw_chunks, orientation)
+        data = blueprint or llm_data or self._generate_generic_flowchart(clean_topic, raw_chunks, orientation)
 
         summary = (
-            f"Generated architectural flowchart for '{topic}' featuring "
+            f"Generated architectural flowchart for '{clean_topic}' featuring "
             f"{len(data.get('steps_walkthrough', []))} chronological steps, "
             f"{len(data.get('components', []))} key components, and "
             f"{len(data.get('decision_points', []))} decision points."
@@ -571,8 +758,8 @@ flowchart {orientation}
 
         res = FlowchartResult(
             status="success",
-            topic=topic,
-            title=data.get("title", f"{topic} Flowchart"),
+            topic=clean_topic,
+            title=data.get("title", f"{clean_topic} Architecture Flow"),
             mermaid_markdown=data.get("mermaid_markdown", ""),
             steps_walkthrough=data.get("steps_walkthrough", []),
             components=data.get("components", []),

@@ -720,17 +720,53 @@
   border-color: #b5cdb8;
 }
 
+.mermaid-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.zoom-btn {
+  padding: 2px 7px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.zoom-level-badge {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  color: var(--color-text-secondary);
+  padding: 0 4px;
+  min-width: 38px;
+  text-align: center;
+}
+
 .mermaid-svg-container {
   padding: 16px 12px;
-  overflow-x: auto;
+  max-height: 380px;
+  overflow: auto;
   display: flex;
   justify-content: center;
+  align-items: center;
   background: white;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+}
+
+.mermaid-svg-viewport {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .mermaid-svg-container svg {
   max-width: 100% !important;
+  max-height: 340px !important;
   height: auto !important;
+  width: auto !important;
+  object-fit: contain;
 }
 
 .mermaid-code-view {
@@ -752,6 +788,193 @@
   font-size: 12px;
   color: #b02a37;
   margin: 0 0 6px;
+}
+
+/* Visual Flowchart Fallback */
+.visual-flowchart-fallback {
+  padding: 12px;
+  background: var(--color-surface);
+  border-radius: 8px;
+}
+
+.visual-fallback-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.visual-fallback-badge {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--color-green-dark);
+}
+
+.visual-flow-nodes-container {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.visual-flow-phase-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.visual-phase-title-pill {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text);
+  background: var(--color-surface);
+  padding: 3px 8px;
+  border-radius: 4px;
+  align-self: flex-start;
+}
+
+.visual-phase-nodes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.visual-flow-step-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.visual-flow-card {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-green);
+  border-radius: 6px;
+  transition: border-color 0.15s ease;
+}
+
+.flow-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.flow-step-num {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--color-green-dark);
+}
+
+.flow-comp-tag {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.flow-action-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text);
+}
+
+.visual-flow-connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 18px;
+  justify-content: center;
+}
+
+.connector-arrow {
+  font-size: 12px;
+  color: var(--color-green);
+  line-height: 1;
+}
+
+.phase-transition-arrow {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.phase-arrow-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  border: 1px dashed var(--color-border);
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.visual-fallback-decisions {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--color-border);
+}
+
+.decisions-section-title {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+
+.decisions-mini-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.decision-mini-card {
+  padding: 6px 10px;
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 11.5px;
+}
+
+.decision-mini-outcomes {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.outcome-pill {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.outcome-pill--yes {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.outcome-pill--no {
+  background: #fbe9e7;
+  color: #c62828;
+}
+
+.empty-flow-text {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin: 0;
 }
 
 /* Flowchart Widget */
