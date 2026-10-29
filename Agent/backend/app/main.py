@@ -375,6 +375,121 @@ def stream_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = 
     )
 
 
+@app.get("/api/v1/chat/threads/{thread_id}/messages")
+@app.get("/api/chat/history")
+@app.get("/api/v1/chat/history")
+def get_chat_history(
+    thread_id: Optional[str] = "thread-1",
+    user_id: Optional[str] = Query("student-1", description="User ID"),
+    limit: int = Query(50, description="Max messages to fetch"),
+):
+    """
+    Retrieve past chat history for the user from Neon PostgreSQL.
+    Survives browser reloads and server restarts.
+    """
+    resolved_user_id = user_id or "student-1"
+    resolved_thread_id = thread_id or "thread-1"
+
+    try:
+        from app.db.session import session_scope
+        from app.db.repositories import UserRepository, ChatMessageRepository
+        from app.db.models import User
+        from sqlalchemy import select
+
+        with session_scope() as db:
+            user_repo = UserRepository(db)
+            user = user_repo.get_by_email(f"{resolved_user_id}@aria.local")
+            if not user:
+                user = user_repo.get(resolved_user_id) or db.scalar(
+                    select(User).where(User.full_name == resolved_user_id)
+                )
+
+            if not user:
+                return {
+                    "thread_id": resolved_thread_id,
+                    "user_id": resolved_user_id,
+                    "messages": [],
+                    "total_messages": 0,
+                }
+
+            msg_repo = ChatMessageRepository(db)
+            messages = msg_repo.list_by_user(user.id, limit=limit)
+
+            formatted_messages = []
+            for m in messages:
+                ts = m.created_at.strftime("%I:%M %p") if m.created_at else None
+                formatted_messages.append({
+                    "id": m.id,
+                    "role": m.role,
+                    "content": m.content,
+                    "intent": m.intent,
+                    "language": m.detected_language,
+                    "sources": m.sources or [],
+                    "latency_ms": m.latency_ms,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                    "timestamp": ts,
+                })
+
+            return {
+                "thread_id": resolved_thread_id,
+                "user_id": resolved_user_id,
+                "messages": formatted_messages,
+                "total_messages": len(formatted_messages),
+            }
+    except Exception as exc:
+        print(f"[ARIA CHAT HISTORY ERROR] {exc}", flush=True)
+        return {
+            "thread_id": resolved_thread_id,
+            "user_id": resolved_user_id,
+            "messages": [],
+            "total_messages": 0,
+            "error": str(exc),
+        }
+
+
+@app.delete("/api/v1/chat/threads/{thread_id}/messages")
+@app.delete("/api/chat/history")
+@app.delete("/api/v1/chat/history")
+def clear_chat_history(
+    thread_id: Optional[str] = "thread-1",
+    user_id: Optional[str] = Query("student-1", description="User ID"),
+):
+    """
+    Delete chat history for the specified user from Neon PostgreSQL.
+    """
+    resolved_user_id = user_id or "student-1"
+    resolved_thread_id = thread_id or "thread-1"
+
+    try:
+        from app.db.session import session_scope
+        from app.db.repositories import UserRepository, ChatMessageRepository
+        from app.db.models import User
+        from sqlalchemy import select
+
+        with session_scope() as db:
+            user_repo = UserRepository(db)
+            user = user_repo.get_by_email(f"{resolved_user_id}@aria.local")
+            if not user:
+                user = user_repo.get(resolved_user_id) or db.scalar(
+                    select(User).where(User.full_name == resolved_user_id)
+                )
+
+            if not user:
+                return {"status": "ok", "deleted_count": 0}
+
+            msg_repo = ChatMessageRepository(db)
+            deleted = msg_repo.delete_by_user(user.id)
+            return {
+                "status": "ok",
+                "user_id": resolved_user_id,
+                "thread_id": resolved_thread_id,
+                "deleted_count": deleted,
+            }
+    except Exception as exc:
+        print(f"[ARIA CLEAR CHAT HISTORY ERROR] {exc}", flush=True)
+        return {"status": "error", "error": str(exc)}
+
+
 @app.post("/api/v1/documents/ingest")
 def ingest_document(payload: DocumentIngestRequest):
     """
