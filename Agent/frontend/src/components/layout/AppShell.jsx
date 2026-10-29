@@ -4,7 +4,15 @@ import { TopBar } from './TopBar'
 import { useTheme } from '../theme/useTheme'
 import './AppShell.css'
 
-export function AppShell({ children, onOpenIngest }) {
+export function AppShell({
+  children,
+  onOpenIngest,
+  threads = [],
+  activeSessionId,
+  onSelectThread,
+  onNewChat,
+  onDeleteThread,
+}) {
   const { theme, toggleTheme } = useTheme()
   const [isNavigationOpen, setIsNavigationOpen] = useState(false)
   const [notice, setNotice] = useState('')
@@ -12,7 +20,9 @@ export function AppShell({ children, onOpenIngest }) {
   function handleNewChat() {
     setIsNavigationOpen(false)
     setNotice('')
-    window.location.reload()
+    if (onNewChat) {
+      onNewChat()
+    }
   }
 
   return (
@@ -26,10 +36,14 @@ export function AppShell({ children, onOpenIngest }) {
         />
       )}
       <Sidebar
+        activeSessionId={activeSessionId}
         isOpen={isNavigationOpen}
         onClose={() => setIsNavigationOpen(false)}
+        onDeleteThread={onDeleteThread}
         onNewChat={handleNewChat}
         onOpenIngest={onOpenIngest}
+        onSelectThread={onSelectThread}
+        threads={threads}
       />
       <div className="app-shell__main">
         <TopBar

@@ -95,23 +95,44 @@ def clean_topic_title(raw_topic: str) -> str:
     if not raw_topic:
         return "Process Architecture"
     cleaned = raw_topic.strip()
-    # Strip polite openings, command verbs, typos (e.g. genrate), and request prefixes
-    cleaned = re.sub(
-        r'^(?:please\s+)?(?:can\s+you\s+)?(?:create|make|generate|genrate|draw|show|build|give\s+me|provide|design)\s+(?:a\s+|an\s+)?(?:flow\s*chart|flowchart|workflow|diagram|architecture|process|map)\s+(?:for|of|about|on|explaining|showing)?\s*(?:topic\s*)?',
-        '',
-        cleaned,
-        flags=re.IGNORECASE
-    ).strip()
-    cleaned = re.sub(
+
+    # Strip conversational introductions and request prefixes
+    prefixes = [
+        r'^(?:please\s+|can\s+you\s+please\s+|can\s+you\s+|could\s+you\s+please\s+|could\s+you\s+)*',
+        r'^(?:create|make|generate|genrate|draw|show|build|give\s+me|provide|design)\s+(?:a\s+|an\s+)?(?:flow\s*chart|flowchart|workflow|diagram|architecture|process|map)\s*(?:for|of|about|on|explaining|showing)?\s*(?:topic\s*)?',
         r'^(?:flow\s*chart|flowchart|diagram|workflow)\s+(?:for|of|about|on|explaining|showing)?\s*(?:topic\s*)?',
-        '',
-        cleaned,
-        flags=re.IGNORECASE
-    ).strip()
-    cleaned = re.sub(r'^(?:explaining|showing|about|for\s+topic|for|topic)\s+', '', cleaned, flags=re.IGNORECASE).strip()
-    cleaned = re.sub(r'[?!.,;:]+$', '', cleaned).strip()
-    if cleaned.lower() == "mcp":
-        return "MCP (Model Context Protocol)"
+        r'^(?:i\s+need\s+(?:a\s+)?(?:to\s+)?(?:know\s+)?(?:how\s+to\s+)?(?:start\s+)?(?:studying|learning|understanding)?)\s*',
+        r'^(?:can\s+you\s+)?(?:please\s+)?(?:help\s+me\s+)?(?:study|learn|understand|revise|explore)\s*',
+        r'^(?:what\s+is|what\s+are|explain|describe|tell\s+me\s+about|how\s+does|how\s+do|give\s+me)\s*',
+        r'^(?:kya\s+hai|kaise\s+kaam\s+karta\s+hai|samjha\s+do|batao|bata\s+do|padhna\s+hai)\s*',
+        r'^(?:explaining|showing|about|for\s+topic|for|topic)\s+',
+    ]
+    for p in prefixes:
+        cleaned = re.sub(p, '', cleaned, flags=re.IGNORECASE).strip()
+
+    # Strip trailing conversational and request artifacts
+    suffixes = [
+        r'\s+(?:in\s+detail|step\s+by\s+step|from\s+scratch|properly|clearly)$',
+        r'\s+(?:create|make|genrate|generate|give\s+me|banao|bana\s+do)\s+(?:a\s+)?(?:flow\s*chart|flowchart|diagram|workflow|plan|schedule)(?:\s+(?:for\s+me|mujhe|plz|please))?$',
+        r'\s+(?:flow\s*chart|flowchart|diagram|workflow|plan\s+for\s+me|for\s+me|ka\s+flowchart)$',
+        r'[?!.,;:]+$',
+    ]
+    for s in suffixes:
+        cleaned = re.sub(s, '', cleaned, flags=re.IGNORECASE).strip()
+
+    cleaned_lower = cleaned.lower()
+    acronym_map = {
+        "mcp": "MCP (Model Context Protocol)",
+        "model context protocol": "MCP (Model Context Protocol)",
+        "rag": "RAG (Retrieval-Augmented Generation)",
+        "retrieval augmented generation": "RAG (Retrieval-Augmented Generation)",
+        "os": "Operating Systems",
+        "vm": "Virtual Memory",
+        "dbms": "Database Management Systems",
+    }
+    if cleaned_lower in acronym_map:
+        return acronym_map[cleaned_lower]
+
     return cleaned.title() if cleaned else "Process Architecture"
 
 

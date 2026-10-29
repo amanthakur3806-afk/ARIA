@@ -241,35 +241,35 @@ class PlannerTool:
         phases = [
             StudyPhase(
                 phase_number=1,
-                title="Foundational Grasp & Intuition",
+                title="Foundational Grasp & Architecture",
                 duration_minutes=p1_time,
-                description=f"Understand the 'why' and core mental model behind {topic}.",
+                description=f"Master the core definitions, fundamental principles, and architectural mental model of {topic}.",
                 action_items=[
-                    f"Read through the core definitions and the everyday analogy for {topic}.",
-                    "Highlight the 2-3 most critical terms or parameters.",
-                    "Close your notes and explain the fundamental premise aloud in 60 seconds."
+                    f"Review core definitions and intuitive mental models for {topic}.",
+                    "Identify the 2-3 most critical concepts, terms, or parameters.",
+                    "Explain the fundamental premise in 60 seconds without consulting notes."
                 ]
             ),
             StudyPhase(
                 phase_number=2,
-                title="Active Application & Dissection",
+                title="Active Application & Mechanism Tracing",
                 duration_minutes=p2_time,
-                description=f"Work through worked examples and challenge mechanisms of {topic}.",
+                description=f"Deepen comprehension through hands-on tracing and practical application of {topic}.",
                 action_items=[
-                    f"Trace the primary process, mechanism, or formula governing {topic}.",
-                    "Identify key edge cases, variations, and common misconceptions.",
-                    "Generate or solve 2-3 targeted practice questions."
+                    f"Trace the primary workflow and execution mechanisms governing {topic}.",
+                    "Analyze key trade-offs, edge cases, and common failure modes.",
+                    "Complete 2-3 targeted active-recall application problems."
                 ]
             ),
             StudyPhase(
                 phase_number=3,
-                title="Active Recall & Synthesis",
+                title="Active Recall & Synthesis Mastery",
                 duration_minutes=p3_time,
-                description=f"Lock in retention and verify mastery of {topic}.",
+                description=f"Synthesize high-yield takeaways and verify long-term retention of {topic}.",
                 action_items=[
-                    "Perform a quick 3-minute self-quiz without peeking at references.",
-                    "Create a 1-page condensed revision flashcard or summary sheet.",
-                    "Schedule review triggers using the spaced repetition calendar."
+                    f"Perform a quick self-test on {topic} without referring to notes.",
+                    "Draft a 1-page condensed memory sheet or conceptual checklist.",
+                    "Schedule spaced review checkpoints using the repetition calendar."
                 ]
             ),
         ]
@@ -296,10 +296,45 @@ class PlannerTool:
         )
 
     def extract_core_topic(self, query: str) -> str:
-        """Extracts the central topic phrase from a user query."""
-        cleaned = re.sub(r'^(what is|what are|explain|describe|tell me about|how does|help me understand|can you plan|revision for)\s+', '', query.strip(), flags=re.IGNORECASE)
-        cleaned = re.sub(r'[?!.,;:]+$', '', cleaned).strip()
-        return cleaned.capitalize() if cleaned else "Academic Concept"
+        """Extracts the central clean academic topic phrase from a user query."""
+        if not query:
+            return "Academic Concept"
+        cleaned = query.strip()
+        # Strip common English & Hinglish question/request phrases
+        prefixes = [
+            r'^(?:i\s+need\s+(?:a\s+)?(?:to\s+)?(?:know\s+)?(?:how\s+to\s+)?(?:start\s+)?(?:studying|learning|understanding)?)\s*',
+            r'^(?:can\s+you\s+)?(?:please\s+)?(?:help\s+me\s+)?(?:study|learn|understand|revise|explore)\s*',
+            r'^(?:what\s+is|what\s+are|explain|describe|tell\s+me\s+about|how\s+does|how\s+do|give\s+me)\s*',
+            r'^(?:create|make|generate|genrate|build|draw|show|design|give\s+me|provide)\s+(?:a\s+|an\s+)?(?:study\s+plan|revision\s+plan|plan|schedule|flow\s*chart|flowchart|workflow|diagram)\s*(?:for|of|on|about)?\s*',
+            r'^(?:flow\s*chart|flowchart|diagram|workflow|study\s+plan|revision\s+plan|plan)\s+(?:for|of|on|about)?\s*',
+            r'^(?:kya\s+hai|kaise\s+kaam\s+karta\s+hai|samjha\s+do|batao|bata\s+do|padhna\s+hai)\s*',
+        ]
+        for p in prefixes:
+            cleaned = re.sub(p, '', cleaned, flags=re.IGNORECASE).strip()
+
+        # Strip trailing conversational and request artifacts
+        suffixes = [
+            r'\s+(?:in\s+detail|step\s+by\s+step|from\s+scratch|properly|clearly)$',
+            r'\s+(?:create|make|genrate|generate|give\s+me|banao|bana\s+do)\s+(?:a\s+)?(?:plan|study\s+plan|revision\s+plan|schedule|flow\s*chart|flowchart|diagram)(?:\s+(?:for\s+me|mujhe|plz|please))?$',
+            r'\s+(?:plan\s+for\s+me|for\s+me|create\s+plan|make\s+plan|ka\s+plan|ka\s+flowchart)$',
+            r'[?!.,;:]+$',
+        ]
+        for s in suffixes:
+            cleaned = re.sub(s, '', cleaned, flags=re.IGNORECASE).strip()
+
+        cleaned_lower = cleaned.lower()
+        acronym_map = {
+            "mcp": "Model Context Protocol (MCP)",
+            "rag": "Retrieval-Augmented Generation (RAG)",
+            "os": "Operating Systems",
+            "dbms": "Database Management Systems",
+            "vm": "Virtual Memory",
+            "cpu": "CPU Architecture & Scheduling",
+        }
+        if cleaned_lower in acronym_map:
+            return acronym_map[cleaned_lower]
+
+        return cleaned.title() if cleaned else "Academic Concept"
 
     def _generate_heuristic_response(
         self,

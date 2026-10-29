@@ -62,7 +62,7 @@ _load_env_file()
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq").lower()
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "600"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "2048"))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -501,6 +501,27 @@ class LLMCommunicator:
 
         return adapter
 
+    def _build_system_message(self, system_instruction: Optional[str], language: str) -> str:
+        lang_directive = (
+            f"\n\nCOMMUNICATION STYLE & LANGUAGE ADAPTATION:\n"
+            f"- Detected student language/style: '{language}'.\n"
+            f"- You MUST match the student's language, dialect, and communication tone naturally.\n"
+            f"- If the student speaks in Hinglish (e.g. 'kya hai mcp', 'samjha do', 'kaise kaam karta hai', 'batao'), explain clearly and conversationally in friendly, fluent Hinglish!\n"
+            f"- If the student writes in Hindi, Spanish, French, or another language, reply fluently in that language.\n"
+            f"- Mirror the student's style: if casual, be warm and approachable; if academic, match their technical depth."
+        )
+        base = system_instruction if system_instruction else (
+            f"You are ARIA, an expert, encouraging academic tutor and study companion powered by Groq ({self.groq_model}). "
+            f"Language: {language}.\n"
+            f"Pedagogical & Formatting Standards:\n"
+            f"1. Refined, Clean Structure: Organize your explanation with crisp Markdown headings (##, ###, ####), intuitive real-world mental models, and step-by-step breakdowns.\n"
+            f"2. Separate Lines for Readability: Always use blank lines between paragraphs, headings, and list items. Never mash bullet points or numbered steps together into single run-on lines.\n"
+            f"3. Visual Clarity & Handshakes: When explaining protocols, algorithms, or handshakes (like TCP 3-Way Handshake, RAG flows, OS paging), use clean numbered steps (Step 1, Step 2, Step 3) with separate lines and clear roles.\n"
+            f"4. Complete & Thorough: Explain both the foundational premise (the 'why') and the practical mechanisms (the 'how'), including reliability, flow control, and edge cases. Ensure answers are fully completed and never left unfinished or truncated.\n"
+            f"5. Key Takeaways & Pro-Tips: Highlight high-yield exam takeaways and intuitive analogies in callouts (> 💡 Pro-Tip: ...)."
+        )
+        return f"{base}{lang_directive}"
+
     def generate_response(
         self,
         prompt: str,
@@ -529,17 +550,8 @@ class LLMCommunicator:
                     client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=self.groq_key, timeout=4.0, max_retries=0)
 
                 ctx_block = "\n---\n".join(context_chunks) if context_chunks else "General academic knowledge context."
-                default_sys = (
-                    f"You are ARIA, an expert, encouraging academic tutor and study companion powered by Groq ({self.groq_model}). "
-                    f"Language: {language}.\n"
-                    f"Guidelines:\n"
-                    f"1. Explain the concepts thoroughly, pedagogically, and systematically with human-like warmth.\n"
-                    f"2. Synthesize and prioritize the provided course notes when they are relevant.\n"
-                    f"3. If the course notes are brief or do not fully cover the question, draw upon your deep academic knowledge to provide an insightful, complete explanation. Do NOT give robotic disclaimers about missing notes.\n"
-                    f"4. Include intuitive real-world analogies, high-yield takeaways, and pro-tips."
-                )
-                sys_msg = system_instruction or default_sys
-                safe_max_tokens = max_tokens or min(LLM_MAX_TOKENS, 700)
+                sys_msg = self._build_system_message(system_instruction, language)
+                safe_max_tokens = max_tokens or min(LLM_MAX_TOKENS, 2048)
 
                 models_to_try = [self.groq_model]
                 if "openai/gpt-oss-20b" not in models_to_try:
@@ -677,17 +689,8 @@ class LLMCommunicator:
                     client = openai.OpenAI(base_url="https://api.groq.com/openai/v1", api_key=self.groq_key, timeout=4.0, max_retries=0)
 
                 ctx_block = "\n---\n".join(context_chunks) if context_chunks else "General academic knowledge context."
-                default_sys = (
-                    f"You are ARIA, an expert, encouraging academic tutor and study companion powered by Groq ({self.groq_model}). "
-                    f"Language: {language}.\n"
-                    f"Guidelines:\n"
-                    f"1. Explain the concepts thoroughly, pedagogically, and systematically with human-like warmth.\n"
-                    f"2. Synthesize and prioritize the provided course notes when they are relevant.\n"
-                    f"3. If the course notes are brief or do not fully cover the question, draw upon your deep academic knowledge to provide an insightful, complete explanation. Do NOT give robotic disclaimers about missing notes.\n"
-                    f"4. Include intuitive real-world analogies, high-yield takeaways, and pro-tips."
-                )
-                sys_msg = system_instruction or default_sys
-                safe_max_tokens = max_tokens or min(LLM_MAX_TOKENS, 700)
+                sys_msg = self._build_system_message(system_instruction, language)
+                safe_max_tokens = max_tokens or min(LLM_MAX_TOKENS, 2048)
 
                 models_to_try = [self.groq_model]
                 if "openai/gpt-oss-20b" not in models_to_try:
@@ -770,6 +773,7 @@ class LLMCommunicator:
 
 class StudyIntent(str, Enum):
     """User intent categories recognized by the Communication Agent."""
+    EXPLAIN_CONCEPT = "explain_concept"
     EXPLAIN_AND_PLAN = "explain_and_plan"
     GENERATE_FLASHCARDS = "generate_flashcards"
     GENERATE_QUIZ = "generate_quiz"
@@ -1114,23 +1118,44 @@ def clean_topic_title(raw_topic: str) -> str:
     if not raw_topic:
         return "Process Architecture"
     cleaned = raw_topic.strip()
-    # Strip polite openings, command verbs, typos (e.g. genrate), and request prefixes
-    cleaned = re.sub(
-        r'^(?:please\s+)?(?:can\s+you\s+)?(?:create|make|generate|genrate|draw|show|build|give\s+me|provide|design)\s+(?:a\s+|an\s+)?(?:flow\s*chart|flowchart|workflow|diagram|architecture|process|map)\s+(?:for|of|about|on|explaining|showing)?\s*(?:topic\s*)?',
-        '',
-        cleaned,
-        flags=re.IGNORECASE
-    ).strip()
-    cleaned = re.sub(
+
+    # Strip conversational introductions and request prefixes
+    prefixes = [
+        r'^(?:please\s+|can\s+you\s+please\s+|can\s+you\s+|could\s+you\s+please\s+|could\s+you\s+)*',
+        r'^(?:create|make|generate|genrate|draw|show|build|give\s+me|provide|design)\s+(?:a\s+|an\s+)?(?:flow\s*chart|flowchart|workflow|diagram|architecture|process|map)\s*(?:for|of|about|on|explaining|showing)?\s*(?:topic\s*)?',
         r'^(?:flow\s*chart|flowchart|diagram|workflow)\s+(?:for|of|about|on|explaining|showing)?\s*(?:topic\s*)?',
-        '',
-        cleaned,
-        flags=re.IGNORECASE
-    ).strip()
-    cleaned = re.sub(r'^(?:explaining|showing|about|for\s+topic|for|topic)\s+', '', cleaned, flags=re.IGNORECASE).strip()
-    cleaned = re.sub(r'[?!.,;:]+$', '', cleaned).strip()
-    if cleaned.lower() == "mcp":
-        return "MCP (Model Context Protocol)"
+        r'^(?:i\s+need\s+(?:a\s+)?(?:to\s+)?(?:know\s+)?(?:how\s+to\s+)?(?:start\s+)?(?:studying|learning|understanding)?)\s*',
+        r'^(?:can\s+you\s+)?(?:please\s+)?(?:help\s+me\s+)?(?:study|learn|understand|revise|explore)\s*',
+        r'^(?:what\s+is|what\s+are|explain|describe|tell\s+me\s+about|how\s+does|how\s+do|give\s+me)\s*',
+        r'^(?:kya\s+hai|kaise\s+kaam\s+karta\s+hai|samjha\s+do|batao|bata\s+do|padhna\s+hai)\s*',
+        r'^(?:explaining|showing|about|for\s+topic|for|topic)\s+',
+    ]
+    for p in prefixes:
+        cleaned = re.sub(p, '', cleaned, flags=re.IGNORECASE).strip()
+
+    # Strip trailing conversational and request artifacts
+    suffixes = [
+        r'\s+(?:in\s+detail|step\s+by\s+step|from\s+scratch|properly|clearly)$',
+        r'\s+(?:create|make|genrate|generate|give\s+me|banao|bana\s+do)\s+(?:a\s+)?(?:flow\s*chart|flowchart|diagram|workflow|plan|schedule)(?:\s+(?:for\s+me|mujhe|plz|please))?$',
+        r'\s+(?:flow\s*chart|flowchart|diagram|workflow|plan\s+for\s+me|for\s+me|ka\s+flowchart)$',
+        r'[?!.,;:]+$',
+    ]
+    for s in suffixes:
+        cleaned = re.sub(s, '', cleaned, flags=re.IGNORECASE).strip()
+
+    cleaned_lower = cleaned.lower()
+    acronym_map = {
+        "mcp": "MCP (Model Context Protocol)",
+        "model context protocol": "MCP (Model Context Protocol)",
+        "rag": "RAG (Retrieval-Augmented Generation)",
+        "retrieval augmented generation": "RAG (Retrieval-Augmented Generation)",
+        "os": "Operating Systems",
+        "vm": "Virtual Memory",
+        "dbms": "Database Management Systems",
+    }
+    if cleaned_lower in acronym_map:
+        return acronym_map[cleaned_lower]
+
     return cleaned.title() if cleaned else "Process Architecture"
 
 
@@ -1234,13 +1259,34 @@ class CommunicationAgent:
     def detect_language(self, text: str) -> str:
         """Identifies language of the query (Dimension 1: Language)."""
         lower = text.lower()
-        if re.search(r'\b(aur|ka|ke|karo|karein|hai|hain|batao|kya|samjhao|padhna|padhao)\b', lower):
+        if re.search(r'\b(aur|ka|ke|ki|ko|se|me|par|karo|karein|karna|hai|hain|ho|tha|thi|the|batao|bata|kya|kyun|kab|kaise|kisko|samjhao|samajh|padhna|padhao|bhai|yaar|nahi|matlab|mujhe|mera|meri|mere|accha|theek|kuch|plz|shukriya|dhanyawad)\b', lower):
             return "hi-en"
-        if re.search(r'\b(explica|memoria|preguntas|cuál|diferencia|hola|qué|que)\b', lower):
+        if re.search(r'[\u0900-\u097F]', text):
+            return "hi"
+        if re.search(r'\b(explica|memoria|preguntas|cuál|diferencia|hola|qué|que|gracias|por\s+favor)\b', lower):
             return "es"
-        if re.search(r'\b(expliquez|processus|mémoire|qu\'est-ce|bonjour|comment)\b', lower):
+        if re.search(r'\b(expliquez|processus|mémoire|qu\'est-ce|bonjour|comment|merci)\b', lower):
             return "fr"
         return "en"
+
+    def _has_plan_request(self, message: str) -> bool:
+        """Determines if the student explicitly asked for a revision/study plan or schedule."""
+        m_lower = message.lower().strip()
+        if any(p in m_lower for p in [
+            "study plan", "revision plan", "schedule", "roadmap", "timeline",
+            "timetable", "revision routine", "prep plan", "revision strategy",
+            "study routine", "make a plan", "create a plan", "plan my", "plan for",
+            "plan revision", "plan out", "plan to study", "plan study", "make plan",
+            "give me a plan", "banao plan", "plan banao", "revision plan banao"
+        ]):
+            return True
+        if re.search(r'\b(plan\s+(my|a|our|the)?\s*(revision|study|preparation|exam|work))\b', m_lower):
+            return True
+        if "plan" in m_lower and any(w in m_lower for w in ["revision", "study", "exam", "prep", "routine", "schedule", "banao"]):
+            return True
+        if re.search(r'\b(plan\s+this|plan\s+it|make\s+plan)\b', m_lower):
+            return True
+        return False
 
     def detect_intent(self, message: str) -> StudyIntent:
         """Determines pedagogical intent from student input."""
@@ -1253,11 +1299,48 @@ class CommunicationAgent:
             return StudyIntent.GENERATE_FLASHCARDS
         if any(p in m_lower for p in ["quiz", "test me", "practice question", "questions", "mcq", "multiple choice"]):
             return StudyIntent.GENERATE_QUIZ
-        if any(p in m_lower for p in ["plan", "schedule", "explain", "how does", "what is", "break down", "difference between", "summarize", "summary", "overview"]):
+        if self._has_plan_request(m_lower):
             return StudyIntent.EXPLAIN_AND_PLAN
         if re.search(r'\b(hi|hello|hey|greetings|hola|bonjour|namaste)\b', m_lower) or any(p in m_lower for p in ["what can you do", "who are you", "how can you help", "help me get started"]):
             return StudyIntent.CONVERSATIONAL_GUIDE
-        return StudyIntent.EXPLAIN_AND_PLAN
+        return StudyIntent.EXPLAIN_CONCEPT
+
+    def generate_conversation_title(self, query: str) -> str:
+        """Generates a concise, pedagogical 3-6 word title for a new conversation thread using the LLM."""
+        query_snippet = query.strip()
+        if not query_snippet:
+            return "New Study Chat"
+
+        prompt = (
+            "You are a study title generator for ARIA. "
+            "Generate a concise academic topic title (strictly 3 to 6 words, no quotation marks, no markdown, no ending period) "
+            f"summarizing this student question or topic:\n\n\"{query_snippet}\"\n\nTitle:"
+        )
+        try:
+            if hasattr(self.llm, "generate_response") and self.llm.is_api_active():
+                raw_title, _ = self.llm.generate_response(
+                    prompt=prompt,
+                    temperature=0.2,
+                    max_tokens=25,
+                    system_instruction="You generate concise 3-6 word academic titles. Do not include quotes, markdown, greetings, or prefixes like 'Title:'. Output only the title."
+                )
+                title = raw_title.strip().strip('"\'`').replace("\n", " ").strip()
+                if title.lower().startswith("title:"):
+                    title = title[6:].strip()
+                words = title.split()
+                if 2 <= len(words) <= 10:
+                    return " ".join(words[:7])
+        except Exception as e:
+            print(f"[ARIA Title Gen Warning] {e}", flush=True)
+
+        # High quality heuristic fallback
+        clean = re.sub(r'[^\w\s-]', '', query_snippet)
+        words = clean.split()
+        stop = {"what", "is", "the", "a", "an", "how", "does", "to", "in", "of", "and", "or", "can", "you", "tell", "me", "about", "please", "kya", "hai", "ka", "ke", "ki", "ko", "se", "aur", "batao", "samjhao"}
+        meaningful = [w for w in words if w.lower() not in stop]
+        if meaningful:
+            return " ".join(meaningful[:5]).title()
+        return (clean[:35] + "..." if len(clean) > 35 else clean).title() or "New Study Chat"
 
     def _extract_count(self, message: str, default: int = 5) -> int:
         match = re.search(r'\b(\d{1,2})\s*(?:questions?|cards?|mcqs?)\b', message, re.IGNORECASE)
@@ -1334,7 +1417,7 @@ class CommunicationAgent:
         # No-context path: honest refusal for questions with no uploaded documents
         # Generative tools (Flowcharts, explicit Study Plans, Revision Workflows, Conversational Guide) synthesize using academic knowledge
         msg_lower = sanitized_message.lower()
-        has_explicit_plan_request = any(w in msg_lower for w in ["plan", "schedule", "roadmap", "revision plan", "study plan", "timeline"])
+        has_explicit_plan_request = self._has_plan_request(msg_lower)
         is_generative_tool_intent = (
             intent == StudyIntent.CONVERSATIONAL_GUIDE or
             intent == StudyIntent.GENERATE_FLOWCHART or
@@ -1378,9 +1461,50 @@ class CommunicationAgent:
             clean_tool_chunks = [sanitized_message]
 
         # ----------------------------------------------------------------------
-        # 1. Intent: Explain & Plan
+        # 0. Intent: Explain Concept (Answering doubt/question without plan)
         # ----------------------------------------------------------------------
-        if intent == StudyIntent.EXPLAIN_AND_PLAN:
+        if intent == StudyIntent.EXPLAIN_CONCEPT:
+            llm_text, llm_ms = self.llm.generate_response(
+                message,
+                raw_text_chunks,
+                language=language,
+                on_token=on_token,
+            )
+
+            total_turn_ms = (time.perf_counter() - t_start) * 1000.0
+            profile = LatencyProfile(
+                retrieval_ms=round(retrieval_ms, 2),
+                tool_execution_ms=0.0,
+                llm_communication_ms=round(llm_ms, 2),
+                total_agent_turn_ms=round(total_turn_ms, 2),
+                sla_met=total_turn_ms <= MAX_LATENCY_MS
+            )
+
+            decision_logger.log(
+                user_id=user_id,
+                path=DecisionPath.GROUNDED,
+                chunk_count=gate_res.chunk_count,
+                top_score=gate_res.top_score,
+                status="success",
+                decision_reason=gate_res.decision_reason
+            )
+
+            return AgentResponse(
+                thread_id=thread_id,
+                user_id=user_id,
+                content=llm_text,
+                intent=intent.value,
+                language=language,
+                actions=[],
+                sources=sources,
+                structured_data=None,
+                latency_profile=profile
+            )
+
+        # ----------------------------------------------------------------------
+        # 1. Intent: Explain & Plan (Only when revision/study plan was requested)
+        # ----------------------------------------------------------------------
+        elif intent == StudyIntent.EXPLAIN_AND_PLAN:
             tone = user_preferences.get("preferred_tone") if user_preferences else None
             plan_duration = compute_adaptive_duration(message, user_preferences, raw_text_chunks)
             plan_res, tool_ms = self.mcp.call_planner(
@@ -1410,10 +1534,22 @@ class CommunicationAgent:
             )
 
             total_dur = study_plan.get('total_duration_minutes', plan_duration)
-            content_lines = [
-                f"{llm_text}\n",
-                f"> 💡 *A personalized **{total_dur}-minute** revision plan with interactive checklist milestones has been prepared in the card below.*"
-            ]
+            has_text_phases = bool(
+                re.search(r'\b(phase\s+1|week\s+1|stage\s+1)\b', llm_text, re.IGNORECASE) and
+                re.search(r'\b(phase\s+2|week\s+2|stage\s+2)\b', llm_text, re.IGNORECASE)
+            )
+
+            if has_text_phases:
+                # LLM already synthesized the comprehensive study plan in markdown text.
+                # Avoid generating a duplicate conflicting plan card or note.
+                content_lines = [llm_text]
+                res_structured_data = None
+            else:
+                content_lines = [
+                    f"{llm_text}\n",
+                    f"> 💡 *A personalized **{total_dur}-minute** revision plan with interactive checklist milestones has been prepared in the card below.*"
+                ]
+                res_structured_data = {"study_plan": study_plan, "logic_valid": valid_logic}
 
             total_turn_ms = (time.perf_counter() - t_start) * 1000.0
             profile = LatencyProfile(
@@ -1441,7 +1577,7 @@ class CommunicationAgent:
                 language=language,
                 actions=actions,
                 sources=sources,
-                structured_data={"study_plan": study_plan, "logic_valid": valid_logic},
+                structured_data=res_structured_data,
                 latency_profile=profile
             )
 
@@ -1828,7 +1964,7 @@ class CommunicationAgent:
         # No-context path: honest refusal for questions with no uploaded documents
         # Generative tools (Flowcharts, explicit Study Plans, Revision Workflows, Conversational Guide) synthesize using academic knowledge
         msg_lower = sanitized_message.lower()
-        has_explicit_plan_request = any(w in msg_lower for w in ["plan", "schedule", "roadmap", "revision plan", "study plan", "timeline"])
+        has_explicit_plan_request = self._has_plan_request(msg_lower)
         is_generative_tool_intent = (
             intent == StudyIntent.CONVERSATIONAL_GUIDE or
             intent == StudyIntent.GENERATE_FLOWCHART or
@@ -1891,7 +2027,19 @@ class CommunicationAgent:
         }
 
         # 2. Dispatch by intent
-        if intent == StudyIntent.EXPLAIN_AND_PLAN:
+        if intent == StudyIntent.EXPLAIN_CONCEPT:
+            t_llm_start = time.perf_counter()
+            for token in self.llm.stream_response(sanitized_message, raw_text_chunks, language=language, system_instruction=GUARDRAIL_SYSTEM_PROMPT):
+                yield {"type": "token", "content": token}
+            llm_ms = (time.perf_counter() - t_llm_start) * 1000.0
+
+            yield {
+                "type": "structured_data",
+                "structured_data": None,
+                "actions": [],
+            }
+
+        elif intent == StudyIntent.EXPLAIN_AND_PLAN:
             tone = user_preferences.get("preferred_tone") if user_preferences else None
             plan_duration = compute_adaptive_duration(sanitized_message, user_preferences, raw_text_chunks)
             plan_res, tool_ms = self.mcp.call_planner(
@@ -1914,19 +2062,35 @@ class CommunicationAgent:
 
             # Stream LLM explanation tokens using strict guardrail system prompt
             t_llm_start = time.perf_counter()
+            streamed_tokens: List[str] = []
             for token in self.llm.stream_response(sanitized_message, raw_text_chunks, language=language, system_instruction=GUARDRAIL_SYSTEM_PROMPT):
+                streamed_tokens.append(token)
                 yield {"type": "token", "content": token}
             llm_ms = (time.perf_counter() - t_llm_start) * 1000.0
 
-            total_dur = study_plan.get('total_duration_minutes', plan_duration)
-            plan_note = f"\n\n> 💡 *A personalized **{total_dur}-minute** revision plan with interactive checklist milestones has been prepared in the card below.*\n"
-            yield {"type": "token", "content": plan_note}
+            full_text = "".join(streamed_tokens)
+            has_text_phases = bool(
+                re.search(r'\b(phase\s+1|week\s+1|stage\s+1)\b', full_text, re.IGNORECASE) and
+                re.search(r'\b(phase\s+2|week\s+2|stage\s+2)\b', full_text, re.IGNORECASE)
+            )
 
-            yield {
-                "type": "structured_data",
-                "structured_data": {"study_plan": study_plan, "logic_valid": valid_logic},
-                "actions": [a.to_dict() for a in actions],
-            }
+            if not has_text_phases:
+                total_dur = study_plan.get('total_duration_minutes', plan_duration)
+                plan_note = f"\n\n> 💡 *A personalized **{total_dur}-minute** revision plan with interactive checklist milestones has been prepared in the card below.*\n"
+                yield {"type": "token", "content": plan_note}
+
+                yield {
+                    "type": "structured_data",
+                    "structured_data": {"study_plan": study_plan, "logic_valid": valid_logic},
+                    "actions": [a.to_dict() for a in actions],
+                }
+            else:
+                # LLM already output the full plan in markdown text. Do not emit duplicate card.
+                yield {
+                    "type": "structured_data",
+                    "structured_data": None,
+                    "actions": [a.to_dict() for a in actions],
+                }
 
         elif intent == StudyIntent.GENERATE_FLASHCARDS:
             card_count = self._extract_count(message, default=5)

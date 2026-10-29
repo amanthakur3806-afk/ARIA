@@ -10,23 +10,29 @@ from sqlalchemy.orm import Session, sessionmaker
 load_dotenv()
 
 
-def _database_url() -> str:
+def _database_url() -> str | None:
     url = os.getenv("DATABASE_URL")
     if not url:
-        raise RuntimeError(
-            "DATABASE_URL is not set. Copy Agent/backend/.env.example to .env and fill it in."
-        )
+        return None
     # Accept a plain postgresql:// URL and use the psycopg (v3) driver.
     if url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+psycopg://", 1)
     return url
 
 
-engine = create_engine(_database_url(), pool_pre_ping=True)
-
-SessionLocal = sessionmaker(
-    bind=engine, autoflush=False, autocommit=False, expire_on_commit=False
-)
+_db_url = _database_url()
+if _db_url:
+    try:
+        engine = create_engine(_db_url, pool_pre_ping=True)
+        SessionLocal = sessionmaker(
+            bind=engine, autoflush=False, autocommit=False, expire_on_commit=False
+        )
+    except Exception:
+        engine = None
+        SessionLocal = None
+else:
+    engine = None
+    SessionLocal = None
 
 
 def get_db() -> Iterator[Session]:
@@ -35,6 +41,8 @@ def get_db() -> Iterator[Session]:
         @router.get("/x")
         def route(db: Session = Depends(get_db)): ...
     """
+    if SessionLocal is None:
+        raise RuntimeError("DATABASE_URL is not set for relational session.")
     db = SessionLocal()
     try:
         yield db
@@ -45,6 +53,8 @@ def get_db() -> Iterator[Session]:
 @contextmanager
 def session_scope() -> Iterator[Session]:
     """For scripts and background jobs: commits on success, rolls back on error."""
+    if SessionLocal is None:
+        raise RuntimeError("DATABASE_URL is not set for relational session.")
     db = SessionLocal()
     try:
         yield db

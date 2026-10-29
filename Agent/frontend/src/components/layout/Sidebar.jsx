@@ -2,7 +2,16 @@ import { Brand } from './Brand'
 import { Icon } from '../ui/Icon'
 import './Sidebar.css'
 
-export function Sidebar({ isOpen, onClose, onNewChat, onOpenIngest }) {
+export function Sidebar({
+  isOpen,
+  onClose,
+  onNewChat,
+  onOpenIngest,
+  threads = [],
+  activeSessionId,
+  onSelectThread,
+  onDeleteThread,
+}) {
   return (
     <aside aria-label="Main navigation" className={`sidebar${isOpen ? ' sidebar--open' : ''}`}>
       <div className="sidebar__top">
@@ -54,7 +63,43 @@ export function Sidebar({ isOpen, onClose, onNewChat, onOpenIngest }) {
 
       <div className="sidebar__section-label sidebar__section-label--recent">Recent</div>
       <div className="recent-chat-list">
-        <p className="recent-chat-empty">Conversations will appear here.</p>
+        {threads.length === 0 ? (
+          <p className="recent-chat-empty">No conversations yet.</p>
+        ) : (
+          threads.map((thread) => {
+            const isActive = thread.id === activeSessionId
+            return (
+              <div
+                key={thread.id}
+                className={`recent-chat-item ${isActive ? 'recent-chat-item--active' : ''}`}
+                onClick={() => {
+                  if (onSelectThread) onSelectThread(thread.id)
+                  if (onClose) onClose()
+                }}
+                role="button"
+                tabIndex={0}
+                title={thread.title}
+              >
+                <Icon name="chat" size={16} />
+                <span className="recent-chat-item__title">{thread.title || 'Study Chat'}</span>
+                {onDeleteThread && (
+                  <button
+                    aria-label={`Delete ${thread.title}`}
+                    className="recent-chat-item__del"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onDeleteThread(thread.id, e)
+                    }}
+                    title="Delete conversation"
+                    type="button"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            )
+          })
+        )}
       </div>
 
       <div className="sidebar__footer">

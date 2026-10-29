@@ -231,6 +231,8 @@ export function MermaidDiagram({ code, fallbackData }) {
   const [copied, setCopied] = useState(false)
   const [showCode, setShowCode] = useState(false)
   const [zoom, setZoom] = useState(1.0)
+  const [isPanning, setIsPanning] = useState(false)
+  const panState = useRef({ isDown: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 })
 
   // Clean and sanitize diagram code
   const cleanCode = sanitizeMermaidCode(code)
@@ -294,15 +296,49 @@ export function MermaidDiagram({ code, fallbackData }) {
   }
 
   function handleZoomIn() {
-    setZoom((z) => Math.min(+(z + 0.15).toFixed(2), 1.8))
+    setZoom((z) => Math.min(+(z + 0.25).toFixed(2), 5.0))
   }
 
   function handleZoomOut() {
-    setZoom((z) => Math.max(+(z - 0.15).toFixed(2), 0.5))
+    setZoom((z) => Math.max(+(z - 0.25).toFixed(2), 0.25))
   }
 
   function handleZoomReset() {
     setZoom(1.0)
+  }
+
+  const handleMouseDown = (e) => {
+    if (!containerRef.current || e.button !== 0) return
+    panState.current = {
+      isDown: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      scrollLeft: containerRef.current.scrollLeft,
+      scrollTop: containerRef.current.scrollTop,
+    }
+    setIsPanning(true)
+  }
+
+  const handleMouseMove = (e) => {
+    if (!panState.current.isDown || !containerRef.current) return
+    e.preventDefault()
+    const dx = e.clientX - panState.current.startX
+    const dy = e.clientY - panState.current.startY
+    containerRef.current.scrollLeft = panState.current.scrollLeft - dx
+    containerRef.current.scrollTop = panState.current.scrollTop - dy
+  }
+
+  const handleMouseUp = () => {
+    panState.current.isDown = false
+    setIsPanning(false)
+  }
+
+  const handleWheel = (e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault()
+      const delta = e.deltaY < 0 ? 0.25 : -0.25
+      setZoom((z) => Math.max(0.25, Math.min(5.0, +(z + delta).toFixed(2))))
+    }
   }
 
   return (
@@ -316,24 +352,60 @@ export function MermaidDiagram({ code, fallbackData }) {
                 type="button"
                 className="toolbar-btn zoom-btn"
                 onClick={handleZoomOut}
-                title="Zoom Out"
+                title="Zoom Out (−25%)"
+                disabled={zoom <= 0.25}
               >
                 −
               </button>
+              <input
+                type="range"
+                min="0.25"
+                max="5.0"
+                step="0.25"
+                value={zoom}
+                onChange={(e) => setZoom(parseFloat(e.target.value))}
+                className="mermaid-zoom-slider"
+                title="Zoom slider (25% to 500%)"
+              />
               <span className="zoom-level-badge">{Math.round(zoom * 100)}%</span>
               <button
                 type="button"
                 className="toolbar-btn zoom-btn"
                 onClick={handleZoomIn}
-                title="Zoom In"
+                title="Zoom In (+25% up to 500%)"
+                disabled={zoom >= 5.0}
               >
                 +
               </button>
               <button
                 type="button"
+                className={`toolbar-btn zoom-preset-btn ${zoom === 1.0 ? 'zoom-preset-btn--active' : ''}`}
+                onClick={() => setZoom(1.0)}
+                title="Set Zoom to 100%"
+              >
+                100%
+              </button>
+              <button
+                type="button"
+                className={`toolbar-btn zoom-preset-btn ${zoom === 2.5 ? 'zoom-preset-btn--active' : ''}`}
+                onClick={() => setZoom(2.5)}
+                title="Set Zoom to 250%"
+              >
+                250%
+              </button>
+              <button
+                type="button"
+                className={`toolbar-btn zoom-preset-btn zoom-preset-btn--highlight ${zoom === 5.0 ? 'zoom-preset-btn--active' : ''}`}
+                onClick={() => setZoom(5.0)}
+                title="Set Zoom to 500% (Maximum Detail)"
+              >
+                500%
+              </button>
+              <button
+                type="button"
                 className="toolbar-btn zoom-btn"
                 onClick={handleZoomReset}
-                title="Reset Zoom"
+                title="Reset Zoom to 100%"
               >
                 ↺
               </button>
@@ -367,18 +439,23 @@ export function MermaidDiagram({ code, fallbackData }) {
       ) : (
         <div
           ref={containerRef}
-          className="mermaid-svg-container"
+          className={`mermaid-svg-container ${isPanning ? 'mermaid-svg-container--panning' : ''}`}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onWheel={handleWheel}
+          title={zoom > 1.0 ? "Drag to pan around diagram, Ctrl+Wheel to zoom" : "Ctrl+Wheel to zoom"}
         >
           <div
             className="mermaid-svg-viewport"
             style={{
               transform: `scale(${zoom})`,
-              transformOrigin: 'top center',
-              transition: 'transform 0.15s ease',
-              width: '100%',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
+              transformOrigin: 'top left',
+              transition: isPanning ? 'none' : 'transform 0.12s ease-out',
+              display: 'inline-block',
+              marginRight: `${Math.max(0, Math.round((zoom - 1) * 550))}px`,
+              marginBottom: `${Math.max(0, Math.round((zoom - 1) * 320))}px`,
             }}
             dangerouslySetInnerHTML={{ __html: svgHtml }}
           />

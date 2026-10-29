@@ -48,6 +48,7 @@ from app.agent.guardrails import (
     VALIDATION_ERROR_TOO_LONG,
     decision_logger,
 )
+from app.db.chat_store import chat_store
 from app.db.rag_store import rag_store
 from app.memory.persist import persist_turn
 
@@ -74,6 +75,12 @@ agent = CommunicationAgent()
 # ------------------------------------------------------------------------------
 # Request & Response Models
 # ------------------------------------------------------------------------------
+
+class CreateThreadRequest(BaseModel):
+    user_id: Optional[str] = Field("student-1", description="User identifier.")
+    title: Optional[str] = Field("New Study Chat", description="Initial conversation title.")
+    thread_id: Optional[str] = Field(None, description="Optional custom thread ID.")
+
 
 class ChatMessageRequest(BaseModel):
     message: str = Field(..., description="Student's query or study request.")
@@ -180,34 +187,50 @@ def handle_chat_message(
 
     message_text = val_res.sanitized_query
 
+    # Ensure conversation thread exists and generate LLM title on first turn
+    conv = chat_store.get_conversation(resolved_thread_id, user_id)
+    thread_title = "Study Chat"
+    if not conv or not conv.get("title") or conv.get("title").strip().lower() in (
+        "new study chat", "new chat", "thread-1", "study chat", f"chat {resolved_thread_id}".lower()
+    ):
+        try:
+            thread_title = agent.generate_conversation_title(message_text)
+        except Exception:
+            thread_title = "Study Chat"
+        chat_store.get_or_create_conversation(resolved_thread_id, user_id, default_title=thread_title)
+        chat_store.update_conversation_title(resolved_thread_id, user_id, thread_title)
+    else:
+        thread_title = conv.get("title") or "Study Chat"
+
     try:
         user_total = rag_store.total_chunks(user_id=user_id)
         session_total = rag_store.total_chunks(user_id=user_id, session_id=resolved_thread_id)
 
-        # When no data is ingested: reply with NO answers, just a greeting and prompt to upload data
-        if user_total == 0 or session_total == 0:
+        # When no user data is ingested anywhere: prompt student to upload notes
+        if user_total == 0:
             user_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
             assistant_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
-            if user_total == 0:
-                default_reply = (
-                    f"Hello! 👋 I'm ARIA, your AI Study Assistant.\n\n"
-                    f"Currently, there is no knowledge base or study data uploaded for student **{user_id}**.\n\n"
-                    f"Please upload a knowledge base or data file (such as your lecture notes, textbook chapters, or revision materials) "
-                    f"using the **📥 Ingest Notes / Knowledge Base** button to begin!"
-                )
-            else:
-                default_reply = (
-                    f"Hello! 👋 I'm ARIA, your AI Study Assistant.\n\n"
-                    f"No study materials have been uploaded for session **{resolved_thread_id}** yet.\n\n"
-                    f"Please upload a knowledge base or data file for this session using the **📥 Ingest Notes / Knowledge Base** button, or switch to an active session with materials."
-                )
+            default_reply = (
+                f"Hello! 👋 I'm ARIA, your AI Study Assistant.\n\n"
+                f"Currently, there is no knowledge base or study data uploaded for student **{user_id}**.\n\n"
+                f"Please upload a knowledge base or data file (such as your lecture notes, textbook chapters, or revision materials) "
+                f"using the **📥 Ingest Notes / Knowledge Base** button to begin!"
+            )
 
-            persist_turn(user_id, message_text, default_reply, intent="no_data_prompt", language="en")
+            persist_turn(
+                user_id=user_id,
+                user_text=message_text,
+                assistant_text=default_reply,
+                thread_id=resolved_thread_id,
+                intent="no_data_prompt",
+                language="en",
+            )
             if on_token:
                 _stream_text_smoothly(default_reply, on_token)
 
             return {
                 "thread_id": resolved_thread_id,
+                "thread_title": thread_title,
                 "user_id": user_id,
                 "user_message": {"id": user_msg_id, "role": "user", "content": message_text},
                 "assistant_message": {
@@ -245,12 +268,20 @@ def handle_chat_message(
                 status="success",
                 decision_reason=gate_res.decision_reason,
             )
-            persist_turn(user_id, message_text, NO_CONTEXT_MESSAGE, intent="no_context", language="en")
+            persist_turn(
+                user_id=user_id,
+                user_text=message_text,
+                assistant_text=NO_CONTEXT_MESSAGE,
+                thread_id=resolved_thread_id,
+                intent="no_context",
+                language="en",
+            )
             if on_token:
                 _stream_text_smoothly(NO_CONTEXT_MESSAGE, on_token)
 
             return {
                 "thread_id": resolved_thread_id,
+                "thread_title": thread_title,
                 "user_id": user_id,
                 "user_message": {"id": f"msg_{uuid.uuid4().hex[:8]}", "role": "user", "content": message_text},
                 "assistant_message": {
@@ -298,15 +329,21 @@ def handle_chat_message(
         assistant_msg_id = f"msg_{uuid.uuid4().hex[:8]}"
 
         persist_turn(
-            user_id, message_text, response.content,
-            intent=response.intent, language=response.language,
+            user_id=user_id,
+            user_text=message_text,
+            assistant_text=response.content,
+            thread_id=resolved_thread_id,
+            intent=response.intent,
+            language=response.language,
             sources=response.sources,
             actions=[a.to_dict() for a in response.actions],
+            structured_data=response.structured_data,
             latency_ms=int((time.perf_counter() - _t0) * 1000),
         )
 
         return {
             "thread_id": resolved_thread_id,
+            "thread_title": thread_title,
             "user_id": user_id,
             "user_message": {
                 "id": user_msg_id,
@@ -350,6 +387,7 @@ def stream_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = 
                 assistant_message = result["assistant_message"]
                 events.put(("complete", {
                     "thread_id": result["thread_id"],
+                    "thread_title": result.get("thread_title"),
                     "user_id": result["user_id"],
                     "assistant_message": assistant_message,
                 }))
@@ -375,76 +413,75 @@ def stream_chat_message(payload: ChatMessageRequest, thread_id: Optional[str] = 
     )
 
 
+@app.get("/api/v1/chat/threads")
+@app.get("/api/chat/threads")
+def list_chat_threads(user_id: str = Query("student-1", description="User ID")):
+    """
+    List all chat threads/conversations for the specified student,
+    ordered by most recently active, with their LLM-generated titles.
+    """
+    resolved_user_id = user_id or "student-1"
+    threads = chat_store.list_conversations(resolved_user_id)
+    return {"user_id": resolved_user_id, "threads": threads}
+
+
+@app.post("/api/v1/chat/threads")
+@app.post("/api/chat/threads")
+def create_chat_thread(payload: CreateThreadRequest):
+    """
+    Explicitly creates a new chat thread for the user with an initial title.
+    """
+    user_id = payload.user_id or "student-1"
+    thread_id = payload.thread_id or f"thread_{uuid.uuid4().hex[:8]}"
+    title = payload.title or "New Study Chat"
+    conv = chat_store.get_or_create_conversation(thread_id, user_id, default_title=title)
+    return {"status": "ok", "thread": conv}
+
+
+@app.delete("/api/v1/chat/threads/{thread_id}")
+def delete_chat_thread(
+    thread_id: str,
+    user_id: Optional[str] = Query("student-1", description="User ID"),
+):
+    """
+    Deletes a conversation thread and all its stored messages.
+    """
+    resolved_user_id = user_id or "student-1"
+    deleted = chat_store.delete_conversation(thread_id, resolved_user_id)
+    return {
+        "status": "ok" if deleted else "not_found",
+        "thread_id": thread_id,
+        "user_id": resolved_user_id,
+    }
+
+
 @app.get("/api/v1/chat/threads/{thread_id}/messages")
 @app.get("/api/chat/history")
 @app.get("/api/v1/chat/history")
 def get_chat_history(
     thread_id: Optional[str] = "thread-1",
     user_id: Optional[str] = Query("student-1", description="User ID"),
-    limit: int = Query(50, description="Max messages to fetch"),
+    limit: int = Query(100, description="Max messages to fetch"),
 ):
     """
-    Retrieve past chat history for the user from Neon PostgreSQL.
+    Retrieve stored chat history for the user from persistent storage (aria_rag.db).
     Survives browser reloads and server restarts.
     """
-    resolved_user_id = user_id or "student-1"
-    resolved_thread_id = thread_id or "thread-1"
+    resolved_user_id = user_id if isinstance(user_id, str) else "student-1"
+    resolved_thread_id = thread_id if isinstance(thread_id, str) else "thread-1"
+    resolved_limit = limit if isinstance(limit, int) else 100
 
-    try:
-        from app.db.session import session_scope
-        from app.db.repositories import UserRepository, ChatMessageRepository
-        from app.db.models import User
-        from sqlalchemy import select
+    conv = chat_store.get_conversation(resolved_thread_id, resolved_user_id)
+    title = conv["title"] if conv else "Study Chat"
+    messages = chat_store.list_messages(resolved_thread_id, resolved_user_id, limit=resolved_limit)
 
-        with session_scope() as db:
-            user_repo = UserRepository(db)
-            user = user_repo.get_by_email(f"{resolved_user_id}@aria.local")
-            if not user:
-                user = user_repo.get(resolved_user_id) or db.scalar(
-                    select(User).where(User.full_name == resolved_user_id)
-                )
-
-            if not user:
-                return {
-                    "thread_id": resolved_thread_id,
-                    "user_id": resolved_user_id,
-                    "messages": [],
-                    "total_messages": 0,
-                }
-
-            msg_repo = ChatMessageRepository(db)
-            messages = msg_repo.list_by_user(user.id, limit=limit)
-
-            formatted_messages = []
-            for m in messages:
-                ts = m.created_at.strftime("%I:%M %p") if m.created_at else None
-                formatted_messages.append({
-                    "id": m.id,
-                    "role": m.role,
-                    "content": m.content,
-                    "intent": m.intent,
-                    "language": m.detected_language,
-                    "sources": m.sources or [],
-                    "latency_ms": m.latency_ms,
-                    "created_at": m.created_at.isoformat() if m.created_at else None,
-                    "timestamp": ts,
-                })
-
-            return {
-                "thread_id": resolved_thread_id,
-                "user_id": resolved_user_id,
-                "messages": formatted_messages,
-                "total_messages": len(formatted_messages),
-            }
-    except Exception as exc:
-        print(f"[ARIA CHAT HISTORY ERROR] {exc}", flush=True)
-        return {
-            "thread_id": resolved_thread_id,
-            "user_id": resolved_user_id,
-            "messages": [],
-            "total_messages": 0,
-            "error": str(exc),
-        }
+    return {
+        "thread_id": resolved_thread_id,
+        "title": title,
+        "user_id": resolved_user_id,
+        "messages": messages,
+        "total_messages": len(messages),
+    }
 
 
 @app.delete("/api/v1/chat/threads/{thread_id}/messages")
@@ -455,39 +492,18 @@ def clear_chat_history(
     user_id: Optional[str] = Query("student-1", description="User ID"),
 ):
     """
-    Delete chat history for the specified user from Neon PostgreSQL.
+    Delete messages for the specified thread while keeping conversation metadata.
     """
     resolved_user_id = user_id or "student-1"
     resolved_thread_id = thread_id or "thread-1"
 
-    try:
-        from app.db.session import session_scope
-        from app.db.repositories import UserRepository, ChatMessageRepository
-        from app.db.models import User
-        from sqlalchemy import select
-
-        with session_scope() as db:
-            user_repo = UserRepository(db)
-            user = user_repo.get_by_email(f"{resolved_user_id}@aria.local")
-            if not user:
-                user = user_repo.get(resolved_user_id) or db.scalar(
-                    select(User).where(User.full_name == resolved_user_id)
-                )
-
-            if not user:
-                return {"status": "ok", "deleted_count": 0}
-
-            msg_repo = ChatMessageRepository(db)
-            deleted = msg_repo.delete_by_user(user.id)
-            return {
-                "status": "ok",
-                "user_id": resolved_user_id,
-                "thread_id": resolved_thread_id,
-                "deleted_count": deleted,
-            }
-    except Exception as exc:
-        print(f"[ARIA CLEAR CHAT HISTORY ERROR] {exc}", flush=True)
-        return {"status": "error", "error": str(exc)}
+    deleted = chat_store.clear_messages(resolved_thread_id, resolved_user_id)
+    return {
+        "status": "ok",
+        "user_id": resolved_user_id,
+        "thread_id": resolved_thread_id,
+        "deleted_count": deleted,
+    }
 
 
 @app.post("/api/v1/documents/ingest")
