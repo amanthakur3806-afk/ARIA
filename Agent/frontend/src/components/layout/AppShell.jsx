@@ -4,14 +4,15 @@ import { TopBar } from './TopBar'
 import { useTheme } from '../theme/useTheme'
 import './AppShell.css'
 
-export function AppShell({ children }) {
+export function AppShell({ children, onOpenIngest }) {
   const { theme, toggleTheme } = useTheme()
   const [isNavigationOpen, setIsNavigationOpen] = useState(false)
   const [notice, setNotice] = useState('')
 
   function handleNewChat() {
     setIsNavigationOpen(false)
-    setNotice('Chat is a UI mockup. Connect the chat API before enabling conversations.')
+    setNotice('')
+    window.location.reload()
   }
 
   return (
@@ -28,11 +29,13 @@ export function AppShell({ children }) {
         isOpen={isNavigationOpen}
         onClose={() => setIsNavigationOpen(false)}
         onNewChat={handleNewChat}
+        onOpenIngest={onOpenIngest}
       />
       <div className="app-shell__main">
         <TopBar
           onMenuClick={() => setIsNavigationOpen(true)}
           onThemeToggle={toggleTheme}
+          onOpenIngest={onOpenIngest}
           theme={theme}
         />
         {notice && (

@@ -1,7 +1,7 @@
 import { Icon } from '../ui/Icon'
 import './TopBar.css'
 
-export function TopBar({ onMenuClick, onThemeToggle, theme }) {
+export function TopBar({ onMenuClick, onThemeToggle, onOpenIngest, theme }) {
   return (
     <header className="topbar">
       <button
@@ -18,6 +18,17 @@ export function TopBar({ onMenuClick, onThemeToggle, theme }) {
         <strong>Study chat</strong>
       </div>
       <div className="topbar__actions">
+        {/* Prominent Ingest Notes Button in Top Header */}
+        <button
+          className="topbar__ingest-btn"
+          onClick={onOpenIngest}
+          title="Upload data file or ingest notes into knowledge base"
+          type="button"
+        >
+          <span className="topbar__ingest-icon">📥</span>
+          <span>Upload / Ingest Notes</span>
+        </button>
+
         <button
           aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
           aria-pressed={theme === 'dark'}
@@ -30,8 +41,7 @@ export function TopBar({ onMenuClick, onThemeToggle, theme }) {
           <span>{theme === 'light' ? 'Dark mode' : 'Light mode'}</span>
         </button>
         <div className="preview-status">
-          <span aria-hidden="true" className="preview-status__dot" />
-          UI preview
+          RAG Active
         </div>
       </div>
     </header>

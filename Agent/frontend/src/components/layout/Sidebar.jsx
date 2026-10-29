@@ -2,13 +2,7 @@ import { Brand } from './Brand'
 import { Icon } from '../ui/Icon'
 import './Sidebar.css'
 
-const navItems = [
-  { label: 'Study chat', icon: 'chat', active: true },
-  { label: 'My library', icon: 'book' },
-  { label: 'Study tasks', icon: 'tasks' },
-]
-
-export function Sidebar({ isOpen, onClose, onNewChat }) {
+export function Sidebar({ isOpen, onClose, onNewChat, onOpenIngest }) {
   return (
     <aside aria-label="Main navigation" className={`sidebar${isOpen ? ' sidebar--open' : ''}`}>
       <div className="sidebar__top">
@@ -31,21 +25,31 @@ export function Sidebar({ isOpen, onClose, onNewChat }) {
 
       <div className="sidebar__section-label">Workspace</div>
       <nav className="sidebar__nav">
-        {navItems.map((item) => (
-          <button
-            aria-current={item.active ? 'page' : undefined}
-            className={`nav-item${item.active ? ' nav-item--active' : ''}`}
-            disabled={!item.active}
-            key={item.label}
-            onClick={onClose}
-            title={item.active ? 'Current page' : 'Coming soon'}
-            type="button"
-          >
-            <Icon name={item.icon} size={18} />
-            <span>{item.label}</span>
-            {!item.active && <span className="nav-item__soon">Soon</span>}
-          </button>
-        ))}
+        <button
+          aria-current="page"
+          className="nav-item nav-item--active"
+          onClick={onClose}
+          type="button"
+        >
+          <Icon name="chat" size={18} />
+          <span>Study chat</span>
+        </button>
+
+        {/* My Library is active and opens the Ingest / Knowledge Base modal */}
+        <button
+          className="nav-item"
+          onClick={() => {
+            onClose()
+            if (onOpenIngest) onOpenIngest()
+          }}
+          title="Open knowledge base and ingested documents"
+          type="button"
+        >
+          <Icon name="book" size={18} />
+          <span>My library</span>
+          <span className="nav-item__soon" style={{ background: '#6366f1', color: '#fff' }}>RAG</span>
+        </button>
+
       </nav>
 
       <div className="sidebar__section-label sidebar__section-label--recent">Recent</div>

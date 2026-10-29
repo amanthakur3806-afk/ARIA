@@ -48,7 +48,8 @@
 }
 
 .composer__bottom,
-.composer__actions {
+.composer__actions,
+.composer__left-actions {
   display: flex;
   align-items: center;
 }
@@ -56,6 +57,42 @@
 .composer__bottom {
   min-height: 34px;
   justify-content: space-between;
+}
+
+.composer__left-actions {
+  gap: 12px;
+}
+
+.composer__attach-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+}
+
+.composer__attach-btn:hover:not(:disabled) {
+  border-color: var(--color-green);
+  color: var(--color-green-dark);
+  background: var(--color-green-surface);
+}
+
+.composer__attach-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.composer__file-input {
+  display: none;
 }
 
 .composer__hint,

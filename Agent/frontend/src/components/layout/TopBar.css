@@ -29,7 +29,6 @@
 .preview-status {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   padding: 7px 11px;
   border: 1px solid var(--color-border);
   border-radius: 20px;
@@ -37,13 +36,6 @@
   background: var(--color-surface);
   font-size: 11px;
   font-weight: 500;
-}
-
-.preview-status__dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #b19d67;
 }
 
 .topbar__actions {
@@ -109,4 +101,31 @@
   .preview-status {
     display: none;
   }
+}
+
+.topbar__ingest-btn {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 14px;
+  border: 1px solid rgba(79, 70, 229, 0.4);
+  border-radius: 20px;
+  color: #fff;
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgba(79, 70, 229, 0.35);
+  transition: all 0.15s ease;
+}
+
+.topbar__ingest-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.5);
+  background: linear-gradient(135deg, #4338ca, #6d28d9);
+}
+
+.topbar__ingest-icon {
+  font-size: 14px;
 }
