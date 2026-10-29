@@ -89,18 +89,7 @@ export function RagKnowledgeModal({
     if (!isOpen || !fileToIngest) return undefined
 
     setActiveTab('ingest')
-    setStatusMessage(null)
-    setSelectedFileName(fileToIngest.name)
-    setTitle((currentTitle) => currentTitle || fileToIngest.name.replace(/\.[^/.]+$/, ''))
-    const reader = readTextFile(
-      fileToIngest,
-      setText,
-      () => setStatusMessage({ type: 'error', text: `Could not read "${fileToIngest.name}".` }),
-    )
-
-    return () => {
-      if (reader.readyState === FileReader.LOADING) reader.abort()
-    }
+    handleFileSelected(fileToIngest)
   }, [fileToIngest, isOpen])
 
   useEffect(() => {
@@ -143,14 +132,72 @@ export function RagKnowledgeModal({
 
   function handleFileSelected(file) {
     if (!file) return
-    setStatusMessage(null)
+
+    // 10MB file size limit check
+    const MAX_SIZE = 10 * 1024 * 1024
+    if (file.size > MAX_SIZE) {
+      setStatusMessage({
+        type: 'error',
+        text: `File "${file.name}" is too large (${(file.size / (1024 * 1024)).toFixed(1)} MB). Maximum allowed size is 10 MB.`,
+      })
+      return
+    }
+
+    setSelectedFile(file)
     setSelectedFileName(file.name)
-    setTitle((currentTitle) => currentTitle || file.name.replace(/\.[^/.]+$/, ''))
-    readTextFile(
-      file,
-      setText,
-      () => setStatusMessage({ type: 'error', text: `Could not read "${file.name}".` }),
-    )
+    setStatusMessage(null)
+
+    if (!title.trim()) {
+      setTitle(file.name.replace(/\.[^/.]+$/, ''))
+    }
+
+    const isPdf = file.name.toLowerCase().endsWith('.pdf')
+    if (isPdf) {
+      setText(`[PDF Document Attached: "${file.name}" (${(file.size / 1024).toFixed(1)} KB)]\n\nARIA will extract text page-by-page and index semantic chunks into the database when you click Ingest Chunks into Database.`)
+    } else {
+      // Text files: .txt, .md, .json, .csv
+      readTextFile(
+        file,
+        (cleanText) => setText(cleanText.replace(/\0/g, '')),
+        () => setStatusMessage({ type: 'error', text: `Failed to read file "${file.name}".` }),
+      )
+    }
+  }
+
+  function handleFileInputChange(e) {
+    const file = e.target.files?.[0]
+    if (file) {
+      handleFileSelected(file)
+    }
+    e.target.value = ''
+  }
+
+  function handleRemoveFile() {
+    setSelectedFile(null)
+    setSelectedFileName('')
+    setText('')
+  }
+
+  function handleDragOver(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(true)
+  }
+
+  function handleDragLeave(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+  }
+
+  function handleDrop(e) {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+    const files = e.dataTransfer.files
+    if (files && files.length > 0) {
+      handleFileSelected(files[0])
+    }
   }
 
   async function handleIngest(e) {

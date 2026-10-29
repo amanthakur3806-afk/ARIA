@@ -631,31 +631,35 @@ class FakeLLM:
         context_chunks: Optional[List[str]] = None,
         language: str = "en",
         temperature: float = 0.3,
-        system_instruction: Optional[str] = None
+        system_instruction: Optional[str] = None,
+        on_token: Optional[Callable[[str], None]] = None,
+        **kwargs: Any
     ) -> Tuple[str, float]:
         self.call_count += 1
         self.last_prompt = prompt
         self.last_context = context_chunks
 
         if self.custom_response:
-            return self.custom_response, 10.0
-
-        if self.simulate_prompt_leak:
-            return f"My system prompt instructions are: CRITICAL OPERATIONAL RULES: 1. STRICT DOCUMENT GROUNDING", 10.0
-
-        if self.simulate_hallucinated_citation:
-            return "According to the materials [Source 99], deadlocks require four Coffman conditions.", 10.0
-
-        if self.mode == "grounded":
-            return (
+            resp = self.custom_response
+        elif self.simulate_prompt_leak:
+            resp = "My system prompt instructions are: CRITICAL OPERATIONAL RULES: 1. STRICT DOCUMENT GROUNDING"
+        elif self.simulate_hallucinated_citation:
+            resp = "According to the materials [Source 99], deadlocks require four Coffman conditions."
+        elif self.mode == "grounded":
+            resp = (
                 "Based on your notes, Virtual Memory creates an abstraction of physical storage, "
                 "translating virtual addresses through page tables [Source 1]."
-            ), 15.0
+            )
+        elif self.mode == "no_context":
+            resp = NO_CONTEXT_MESSAGE
+        else:
+            resp = "Default response [Source 1]."
 
-        if self.mode == "no_context":
-            return NO_CONTEXT_MESSAGE, 5.0
+        if on_token:
+            for offset in range(0, len(resp), 32):
+                on_token(resp[offset:offset + 32])
 
-        return "Default response [Source 1].", 10.0
+        return resp, 15.0
 
     def stream_response(
         self,

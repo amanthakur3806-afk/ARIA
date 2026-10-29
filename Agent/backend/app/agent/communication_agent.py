@@ -1146,6 +1146,7 @@ class CommunicationAgent:
         user_id: str = "student-1",
         thread_id: str = "thread-1",
         context_chunks: Optional[List[Union[str, Dict[str, Any]]]] = None,
+        context_scores: Optional[List[float]] = None,
         user_preferences: Optional[Dict[str, Any]] = None,
         on_token: Optional[Callable[[str], None]] = None,
     ) -> AgentResponse:

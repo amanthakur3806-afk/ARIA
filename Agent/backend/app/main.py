@@ -123,16 +123,46 @@ def handle_chat_message(
     3. Retrieval Gate: RAG_MIN_SCORE filtering deciding the path BEFORE any model call.
     4. Output Guard: citation verification, source correction, and decision logging.
     """
-    if payload.stream:
-        return handle_chat_stream(payload=payload, thread_id=thread_id)
+    if payload.stream and on_token is None:
+        return stream_chat_message(payload=payload, thread_id=thread_id)
 
     resolved_thread_id = thread_id or payload.thread_id or "thread-1"
     _t0 = time.perf_counter()
     user_id = payload.user_id or "student-1"
-    message_text = payload.message.strip()
+    raw_message = payload.message
 
-    if not message_text:
-        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+    # 1. Layer 1: Input Guard
+    val_res = InputGuard.validate(raw_message, authenticated_user_id=user_id)
+    if not val_res.is_valid:
+        if val_res.status == "validation_error":
+            raise HTTPException(status_code=400, detail=val_res.error_message)
+        else:
+            decision_logger.log(
+                user_id=user_id,
+                path=val_res.path,
+                chunk_count=0,
+                top_score=None,
+                status=val_res.status,
+                decision_reason=val_res.refusal_reason or "security_refusal",
+            )
+            return {
+                "thread_id": resolved_thread_id,
+                "user_id": user_id,
+                "user_message": {"id": f"msg_{uuid.uuid4().hex[:8]}", "role": "user", "content": raw_message},
+                "assistant_message": {
+                    "id": f"msg_{uuid.uuid4().hex[:8]}",
+                    "role": "assistant",
+                    "content": val_res.error_message or SECURITY_REFUSAL_MESSAGE,
+                    "intent": "security_refusal",
+                    "language": "en",
+                    "sources": [],
+                    "actions": [],
+                    "structured_data": None,
+                    "latency_profile": None,
+                },
+            }
+
+    message_text = val_res.sanitized_query
 
     try:
         user_total = rag_store.total_chunks(user_id=user_id)
@@ -164,12 +194,12 @@ def handle_chat_message(
             return {
                 "thread_id": resolved_thread_id,
                 "user_id": user_id,
-                "user_message": {"id": f"msg_{uuid.uuid4().hex[:8]}", "role": "user", "content": raw_message},
+                "user_message": {"id": user_msg_id, "role": "user", "content": message_text},
                 "assistant_message": {
-                    "id": f"msg_{uuid.uuid4().hex[:8]}",
+                    "id": assistant_msg_id,
                     "role": "assistant",
-                    "content": val_res.error_message or SECURITY_REFUSAL_MESSAGE,
-                    "intent": "security_refusal",
+                    "content": default_reply,
+                    "intent": "no_data_prompt",
                     "language": "en",
                     "sources": [],
                     "actions": [],
@@ -177,12 +207,6 @@ def handle_chat_message(
                     "latency_profile": None,
                 },
             }
-
-    message_text = val_res.sanitized_query
-
-    try:
-        user_total = rag_store.total_chunks(user_id=user_id)
-        session_total = rag_store.total_chunks(user_id=user_id, session_id=resolved_thread_id)
 
         # Retrieve chunks strictly scoped to user and session
         matched_chunks, scores, ret_lat = rag_store.search(
@@ -193,7 +217,41 @@ def handle_chat_message(
             allow_curriculum_fallback=False,
         )
 
-        streamed_content: List[str] = []
+        # 2. Layer 2: Retrieval Gate evaluated BEFORE model call
+        intent = agent.detect_intent(message_text)
+        gate_res = RetrievalGate.evaluate(matched_chunks, scores, min_score=RAG_MIN_SCORE)
+        if gate_res.path == DecisionPath.NO_CONTEXT and intent != StudyIntent.CONVERSATIONAL_GUIDE:
+            decision_logger.log(
+                user_id=user_id,
+                path=DecisionPath.NO_CONTEXT,
+                chunk_count=0,
+                top_score=gate_res.top_score,
+                status="success",
+                decision_reason=gate_res.decision_reason,
+            )
+            persist_turn(user_id, message_text, NO_CONTEXT_MESSAGE, intent="no_context", language="en")
+            if on_token:
+                for offset in range(0, len(NO_CONTEXT_MESSAGE), 32):
+                    on_token(NO_CONTEXT_MESSAGE[offset:offset + 32])
+
+            return {
+                "thread_id": resolved_thread_id,
+                "user_id": user_id,
+                "user_message": {"id": f"msg_{uuid.uuid4().hex[:8]}", "role": "user", "content": message_text},
+                "assistant_message": {
+                    "id": f"msg_{uuid.uuid4().hex[:8]}",
+                    "role": "assistant",
+                    "content": NO_CONTEXT_MESSAGE,
+                    "intent": "no_context",
+                    "language": "en",
+                    "sources": [],
+                    "actions": [],
+                    "structured_data": None,
+                    "latency_profile": None,
+                },
+            }
+
+        streamed_content = []
 
         def emit_token(token: str):
             if on_token:
@@ -249,6 +307,8 @@ def handle_chat_message(
                 "latency_profile": response.latency_profile.to_dict() if response.latency_profile else None,
             },
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent execution error: {str(e)}")
 
