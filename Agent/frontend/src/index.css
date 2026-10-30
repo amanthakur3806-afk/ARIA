@@ -22,6 +22,8 @@
   --color-border-strong: #dcd8cb;
   --color-green-surface: #edf1e8;
   --color-green-soft: #f2f3e9;
+  --color-primary-gradient: linear-gradient(135deg, #456b55 0%, #345941 100%);
+  --color-primary-gradient-hover: linear-gradient(135deg, #3d5e4b 0%, #294733 100%);
   --font-heading: Georgia, 'Times New Roman', serif;
   color: var(--color-text);
   background: var(--color-app-bg);
@@ -43,6 +45,8 @@
   --color-border-strong: #485047;
   --color-green-surface: #303b31;
   --color-green-soft: #30382f;
+  --color-primary-gradient: linear-gradient(135deg, #456b55 0%, #345941 100%);
+  --color-primary-gradient-hover: linear-gradient(135deg, #3d5e4b 0%, #294733 100%);
   color: var(--color-text);
   background: var(--color-app-bg);
   color-scheme: dark;
@@ -54,8 +58,9 @@
 
 body {
   min-width: 360px;
-  min-height: 100vh;
+  height: 100dvh;
   margin: 0;
+  overflow: hidden;
   color: var(--color-text);
   background: var(--color-app-bg);
   transition: color 180ms ease, background-color 180ms ease;
@@ -73,7 +78,7 @@ button {
 button:focus-visible,
 textarea:focus-visible {
   outline: 3px solid #a9c5a5;
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
 
 ::selection {

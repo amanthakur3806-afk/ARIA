@@ -4,6 +4,7 @@ import { ChatPage } from './features/chat/ChatPage'
 
 function App() {
   const [isRagModalOpen, setIsRagModalOpen] = useState(false)
+  const [ragModalTab, setRagModalTab] = useState('library')
   const [userId] = useState('student-1')
   const [threads, setThreads] = useState([])
   const [activeSessionId, setActiveSessionId] = useState(() => {
@@ -58,17 +59,29 @@ function App() {
     }
   }
 
+  function handleOpenLibrary() {
+    setRagModalTab('library')
+    setIsRagModalOpen(true)
+  }
+
+  function handleOpenIngest() {
+    setRagModalTab('ingest')
+    setIsRagModalOpen(true)
+  }
+
   return (
     <AppShell
       activeSessionId={activeSessionId}
       onDeleteThread={handleDeleteThread}
       onNewChat={handleNewChat}
-      onOpenIngest={() => setIsRagModalOpen(true)}
+      onOpenIngest={handleOpenIngest}
+      onOpenLibrary={handleOpenLibrary}
       onSelectThread={handleSelectThread}
       threads={threads}
     >
       <ChatPage
         activeSessionId={activeSessionId}
+        initialRagTab={ragModalTab}
         isRagModalOpen={isRagModalOpen}
         onRefreshThreads={loadThreads}
         onSelectSession={handleSelectThread}

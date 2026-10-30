@@ -7,6 +7,7 @@ import './AppShell.css'
 export function AppShell({
   children,
   onOpenIngest,
+  onOpenLibrary,
   threads = [],
   activeSessionId,
   onSelectThread,
@@ -42,6 +43,7 @@ export function AppShell({
         onDeleteThread={onDeleteThread}
         onNewChat={handleNewChat}
         onOpenIngest={onOpenIngest}
+        onOpenLibrary={onOpenLibrary}
         onSelectThread={onSelectThread}
         threads={threads}
       />

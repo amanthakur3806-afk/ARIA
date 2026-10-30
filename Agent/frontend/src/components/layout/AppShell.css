@@ -1,14 +1,25 @@
 .app-shell {
-  min-height: 100dvh;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
 }
 
 .app-shell__main {
-  min-height: 100dvh;
+  height: 100dvh;
+  max-height: 100dvh;
   margin-left: 276px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .app-shell__content {
-  min-height: calc(100dvh - 72px);
+  flex: 1 1 0%;
+  min-height: 0;
+  height: calc(100dvh - 72px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .app-shell__notice {
@@ -25,7 +36,7 @@
   border-radius: 12px;
   color: var(--color-text);
   background: var(--color-surface);
-  box-shadow: 0 14px 36px rgb(34 42 34 / 12%);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.12);
   font-size: 13px;
 }
 
@@ -44,7 +55,7 @@
 }
 
 .app-shell__notice button:hover {
-  background: var(--color-green-surface);
+  background: rgba(99, 102, 241, 0.1);
 }
 
 .sidebar-backdrop {
@@ -57,7 +68,7 @@
   }
 
   .app-shell__content {
-    min-height: calc(100dvh - 64px);
+    height: calc(100dvh - 64px);
   }
 
   .app-shell__notice {
@@ -72,7 +83,7 @@
     inset: 0;
     display: block;
     border: 0;
-    background: rgb(18 24 19 / 48%);
-    backdrop-filter: blur(2px);
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(4px);
   }
 }

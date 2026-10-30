@@ -7,6 +7,7 @@ export function Sidebar({
   onClose,
   onNewChat,
   onOpenIngest,
+  onOpenLibrary,
   threads = [],
   activeSessionId,
   onSelectThread,
@@ -44,21 +45,21 @@ export function Sidebar({
           <span>Study chat</span>
         </button>
 
-        {/* My Library is active and opens the Ingest / Knowledge Base modal */}
+        {/* My Library opens the Library view of the modal */}
         <button
           className="nav-item"
           onClick={() => {
             onClose()
-            if (onOpenIngest) onOpenIngest()
+            if (onOpenLibrary) onOpenLibrary()
+            else if (onOpenIngest) onOpenIngest()
           }}
-          title="Open knowledge base and ingested documents"
+          title="Open study library and ingested course materials"
           type="button"
         >
           <Icon name="book" size={18} />
           <span>My library</span>
-          <span className="nav-item__soon" style={{ background: '#6366f1', color: '#fff' }}>RAG</span>
+          <span className="nav-item__soon" style={{ background: 'var(--color-green, #456b55)', color: '#fff' }}>RAG</span>
         </button>
-
       </nav>
 
       <div className="sidebar__section-label sidebar__section-label--recent">Recent</div>
@@ -78,24 +79,19 @@ export function Sidebar({
                 }}
                 role="button"
                 tabIndex={0}
-                title={thread.title}
               >
-                <Icon name="chat" size={16} />
-                <span className="recent-chat-item__title">{thread.title || 'Study Chat'}</span>
-                {onDeleteThread && (
-                  <button
-                    aria-label={`Delete ${thread.title}`}
-                    className="recent-chat-item__del"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onDeleteThread(thread.id, e)
-                    }}
-                    title="Delete conversation"
-                    type="button"
-                  >
-                    ×
-                  </button>
-                )}
+                <span className="recent-chat-item__icon">💬</span>
+                <span className="recent-chat-item__title" title={thread.title || thread.id}>
+                  {thread.title || thread.id}
+                </span>
+                <button
+                  className="recent-chat-item__del"
+                  onClick={(e) => onDeleteThread && onDeleteThread(thread.id, e)}
+                  title="Delete conversation"
+                  type="button"
+                >
+                  ✕
+                </button>
               </div>
             )
           })
@@ -103,19 +99,10 @@ export function Sidebar({
       </div>
 
       <div className="sidebar__footer">
-        <div aria-hidden="true" className="profile-avatar">S</div>
-        <div className="sidebar__profile-copy">
-          <span className="sidebar__profile-name">Study space</span>
-          <span className="sidebar__profile-plan">Personal workspace</span>
+        <div className="sidebar__status-badge">
+          <span className="status-dot status-dot--online" />
+          <span>PostgreSQL · FastMCP</span>
         </div>
-        <button
-          aria-label="Workspace options (coming soon)"
-          className="icon-button sidebar__more"
-          disabled
-          type="button"
-        >
-          ···
-        </button>
       </div>
     </aside>
   )

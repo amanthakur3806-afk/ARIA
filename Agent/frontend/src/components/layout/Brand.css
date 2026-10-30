@@ -8,11 +8,11 @@
 
 .brand__mark {
   display: grid;
-  width: 39px;
-  height: 39px;
+  width: 38px;
+  height: 38px;
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--color-green) 22%, transparent);
-  border-radius: 13px;
+  border-radius: 12px;
   color: var(--color-green-dark);
   background: var(--color-green-surface);
   font-family: var(--font-heading);

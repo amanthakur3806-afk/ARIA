@@ -1,407 +1,639 @@
-.welcome {
-  display: flex;
-  width: min(100%, 760px);
-  flex-direction: column;
-  align-items: center;
-  padding: 48px 18px 34px;
-  text-align: center;
-  animation: welcome-in 520ms ease-out both;
-}
-
-.welcome__illustration {
-  position: relative;
-  display: grid;
-  width: 100px;
-  height: 100px;
-  place-items: center;
-  margin-bottom: 27px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 50%;
-  background: var(--color-surface);
-  box-shadow: 0 12px 32px rgb(52 64 48 / 6%);
-}
-
-.welcome__orbit {
-  position: absolute;
-  border: 1px solid var(--color-border);
-  border-radius: 50%;
-}
-
-.welcome__orbit--outer {
-  inset: -10px;
-  border-style: dashed;
-  opacity: 0.75;
-}
-
-.welcome__orbit--inner {
-  inset: 9px;
-  border-color: var(--color-border);
-}
-
-.welcome__book {
-  position: relative;
-  display: flex;
-  width: 43px;
-  height: 36px;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  transform: rotate(-6deg);
-}
-
-.welcome__book::before,
-.welcome__book::after {
-  width: 20px;
-  height: 31px;
-  border: 1px solid #8da78d;
-  border-radius: 5px 2px 2px 5px;
-  background: var(--color-green-soft);
-  content: '';
-}
-
-.welcome__book::after {
-  border-color: #708d70;
-  border-radius: 2px 5px 5px 2px;
-  background: var(--color-green-surface);
-}
-
-.welcome__book span {
-  position: absolute;
-  z-index: 1;
-  left: 12px;
-  width: 6px;
-  height: 1px;
-  background: #8da78d;
-}
-
-.welcome__book span:nth-child(1) {
-  top: 12px;
-}
-
-.welcome__book span:nth-child(2) {
-  top: 17px;
-}
-
-.welcome__book span:nth-child(3) {
-  top: 22px;
-}
-
-.welcome__sparkle {
-  position: absolute;
-  display: grid;
-  place-items: center;
-  color: #81977c;
-}
-
-.welcome__sparkle--one {
-  top: 4px;
-  right: -3px;
-}
-
-.welcome__sparkle--two {
-  bottom: 8px;
-  left: -4px;
-  color: #ad9862;
-}
-
-.welcome__eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  color: var(--color-green-dark);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1.8px;
-}
-
-.welcome__eyebrow span {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #a58d54;
-}
-
-.welcome h1 {
-  margin: 18px 0 13px;
-  color: var(--color-text);
-  font-family: var(--font-heading);
-  font-size: clamp(38px, 4.5vw, 54px);
-  font-weight: 500;
-  letter-spacing: -1.7px;
-  line-height: 1.08;
-}
-
-.welcome__description {
-  max-width: 470px;
-  margin: 0;
-  color: var(--color-text-secondary);
-  font-size: 15px;
-  line-height: 1.75;
-}
-
-.suggestion-list {
-  display: grid;
-  width: min(100%, 650px);
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-top: 37px;
-}
-
-.suggestion-card {
-  display: flex;
-  min-height: 82px;
-  align-items: center;
-  gap: 11px;
-  padding: 13px;
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  color: var(--color-text-secondary);
-  background: var(--color-surface);
-  text-align: left;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 550;
-  line-height: 1.4;
-  transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
-}
-
-.suggestion-card:hover:not(:disabled) {
-  transform: translateY(-2px);
-  border-color: #b8c5b3;
-  box-shadow: 0 8px 20px rgb(44 73 49 / 8%);
-}
-
-.suggestion-card:disabled {
-  opacity: 1;
-  cursor: default;
-}
-
-.suggestion-card__icon {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid color-mix(in srgb, var(--color-green) 12%, transparent);
-  border-radius: 10px;
-  color: var(--color-green-dark);
-  background: var(--color-green-soft);
-}
-
-.suggestion-card__arrow {
-  flex: 0 0 auto;
-  margin-left: auto;
-  color: var(--color-text-muted);
-}
-
-@keyframes welcome-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@media (max-width: 600px) {
-  .welcome {
-    padding: 26px 8px 20px;
-  }
-
-  .welcome__illustration {
-    width: 82px;
-    height: 82px;
-    margin-bottom: 23px;
-  }
-
-  .welcome__desktop-break {
-    display: none;
-  }
-
-  .welcome h1 {
-    margin-top: 15px;
-    font-size: clamp(35px, 10vw, 46px);
-  }
-
-  .welcome__description {
-    max-width: 330px;
-    font-size: 14px;
-  }
-
-  .suggestion-list {
-    max-width: 390px;
-    grid-template-columns: 1fr;
-    gap: 9px;
-    margin-top: 27px;
-  }
-
-  .suggestion-card {
-    min-height: 58px;
-    padding: 10px 12px;
-    font-size: 13px;
-  }
-}
-
-@media (max-height: 760px) and (min-width: 601px) {
-  .welcome {
-    padding-top: 20px;
-    padding-bottom: 16px;
-  }
-
-  .welcome__illustration {
-    width: 76px;
-    height: 76px;
-    margin-bottom: 16px;
-  }
-
-  .welcome h1 {
-    margin-top: 12px;
-    margin-bottom: 8px;
-    font-size: clamp(36px, 3.8vw, 44px);
-  }
-
-  .welcome__description {
-    font-size: 13px;
-  }
-
-  .suggestion-list {
-    gap: 9px;
-    margin-top: 20px;
-  }
-
-  .suggestion-card {
-    min-height: 68px;
-    padding: 10px;
-    font-size: 11px;
-  }
-
-  .suggestion-card__icon {
-    width: 32px;
-    height: 32px;
-  }
-}
-
-@media (max-height: 540px) and (min-width: 601px) {
-  .welcome {
-    padding-top: 6px;
-    padding-bottom: 6px;
-  }
-
-  .welcome__illustration {
-    display: none;
-  }
-
-  .welcome h1 {
-    margin: 8px 0 6px;
-    font-size: 34px;
-  }
-
-  .welcome__description {
-    font-size: 12px;
-    line-height: 1.5;
-  }
-
-  .suggestion-list {
-    margin-top: 12px;
-  }
-
-  .suggestion-card {
-    min-height: 54px;
-    font-size: 10px;
-  }
-
-  .suggestion-card__icon {
-    width: 29px;
-    height: 29px;
-  }
-}
-
-/* Ingestion CTA Card on Welcome Screen */
-.welcome__ingest-card {
-  width: 100%;
-  max-width: 680px;
-  margin: 18px 0 24px;
-  padding: 16px 20px;
-  border-radius: 14px;
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(168, 85, 247, 0.05) 100%);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  text-align: left;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.05);
-}
-
-.welcome__ingest-badge {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #6366f1;
-  background: rgba(99, 102, 241, 0.12);
-  padding: 3px 8px;
-  border-radius: 20px;
-  margin-bottom: 6px;
-}
-
-.welcome__ingest-heading {
-  margin: 0 0 4px;
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--color-text, #1e293b);
-}
-
-.welcome__ingest-text {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--color-text-secondary, #64748b);
-}
-
-.welcome__ingest-btn {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 18px;
-  border-radius: 10px;
-  border: none;
-  background: linear-gradient(135deg, #4f46e5, #7c3aed);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
-  transition: all 0.15s ease;
-}
-
-.welcome__ingest-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(79, 70, 229, 0.45);
-}
-
-.welcome__ingest-arrow {
-  font-size: 15px;
-  transition: transform 0.15s ease;
-}
-
-.welcome__ingest-btn:hover .welcome__ingest-arrow {
-  transform: translateX(3px);
-}
-
-@media (max-width: 600px) {
-  .welcome__ingest-card {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  .welcome__ingest-btn {
-    width: 100%;
-    justify-content: center;
-  }
-}
-
+.welcome {
+
+  display: flex;
+
+  width: min(100%, 760px);
+
+  flex-direction: column;
+
+  align-items: center;
+
+  padding: 48px 18px 34px;
+
+  text-align: center;
+
+  animation: welcome-in 520ms ease-out both;
+
+}
+
+
+
+.welcome__illustration {
+
+  position: relative;
+
+  display: grid;
+
+  width: 100px;
+
+  height: 100px;
+
+  place-items: center;
+
+  margin-bottom: 27px;
+
+  border: 1px solid var(--color-border-strong);
+
+  border-radius: 50%;
+
+  background: var(--color-surface);
+
+  box-shadow: 0 12px 32px rgb(52 64 48 / 6%);
+
+}
+
+
+
+.welcome__orbit {
+
+  position: absolute;
+
+  border: 1px solid var(--color-border);
+
+  border-radius: 50%;
+
+}
+
+
+
+.welcome__orbit--outer {
+
+  inset: -10px;
+
+  border-style: dashed;
+
+  opacity: 0.75;
+
+}
+
+
+
+.welcome__orbit--inner {
+
+  inset: 9px;
+
+  border-color: var(--color-border);
+
+}
+
+
+
+.welcome__book {
+
+  position: relative;
+
+  display: flex;
+
+  width: 43px;
+
+  height: 36px;
+
+  align-items: center;
+
+  justify-content: center;
+
+  gap: 3px;
+
+  transform: rotate(-6deg);
+
+}
+
+
+
+.welcome__book::before,
+
+.welcome__book::after {
+
+  width: 20px;
+
+  height: 31px;
+
+  border: 1px solid #8da78d;
+
+  border-radius: 5px 2px 2px 5px;
+
+  background: var(--color-green-soft);
+
+  content: '';
+
+}
+
+
+
+.welcome__book::after {
+
+  border-color: #708d70;
+
+  border-radius: 2px 5px 5px 2px;
+
+  background: var(--color-green-surface);
+
+}
+
+
+
+.welcome__book span {
+
+  position: absolute;
+
+  z-index: 1;
+
+  left: 12px;
+
+  width: 6px;
+
+  height: 1px;
+
+  background: #8da78d;
+
+}
+
+
+
+.welcome__book span:nth-child(1) {
+
+  top: 12px;
+
+}
+
+
+
+.welcome__book span:nth-child(2) {
+
+  top: 17px;
+
+}
+
+
+
+.welcome__book span:nth-child(3) {
+
+  top: 22px;
+
+}
+
+
+
+.welcome__sparkle {
+
+  position: absolute;
+
+  display: grid;
+
+  place-items: center;
+
+  color: #81977c;
+
+}
+
+
+
+.welcome__sparkle--one {
+
+  top: 4px;
+
+  right: -3px;
+
+}
+
+
+
+.welcome__sparkle--two {
+
+  bottom: 8px;
+
+  left: -4px;
+
+  color: #ad9862;
+
+}
+
+
+
+.welcome__eyebrow {
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 9px;
+
+  color: var(--color-green-dark);
+
+  font-size: 10px;
+
+  font-weight: 700;
+
+  letter-spacing: 1.8px;
+
+}
+
+
+
+.welcome__eyebrow span {
+
+  width: 6px;
+
+  height: 6px;
+
+  border-radius: 50%;
+
+  background: #a58d54;
+
+}
+
+
+
+.welcome h1 {
+
+  margin: 18px 0 13px;
+
+  color: var(--color-text);
+
+  font-family: var(--font-heading);
+
+  font-size: clamp(38px, 4.5vw, 54px);
+
+  font-weight: 500;
+
+  letter-spacing: -1.7px;
+
+  line-height: 1.08;
+
+}
+
+
+
+.welcome__description {
+
+  max-width: 470px;
+
+  margin: 0;
+
+  color: var(--color-text-secondary);
+
+  font-size: 15px;
+
+  line-height: 1.75;
+
+}
+
+
+
+.suggestion-list {
+
+  display: grid;
+
+  width: min(100%, 650px);
+
+  grid-template-columns: repeat(3, 1fr);
+
+  gap: 12px;
+
+  margin-top: 37px;
+
+}
+
+
+
+.suggestion-card {
+
+  display: flex;
+
+  min-height: 82px;
+
+  align-items: center;
+
+  gap: 11px;
+
+  padding: 13px;
+
+  border: 1px solid var(--color-border);
+
+  border-radius: 12px;
+
+  color: var(--color-text-secondary);
+
+  background: var(--color-surface);
+
+  text-align: left;
+
+  cursor: pointer;
+
+  font-size: 12px;
+
+  font-weight: 550;
+
+  line-height: 1.4;
+
+  transition: border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+
+}
+
+
+
+.suggestion-card:hover:not(:disabled) {
+
+  transform: translateY(-2px);
+
+  border-color: rgba(99, 102, 241, 0.4);
+
+  box-shadow: 0 8px 24px rgba(79, 70, 229, 0.1);
+
+}
+
+
+
+.suggestion-card:disabled {
+
+  opacity: 1;
+
+  cursor: default;
+
+}
+
+
+
+.suggestion-card__icon {
+
+  display: grid;
+
+  width: 36px;
+
+  height: 36px;
+
+  flex: 0 0 auto;
+
+  place-items: center;
+
+  border: 1px solid rgba(99, 102, 241, 0.2);
+
+  border-radius: 10px;
+
+  color: #6366f1;
+
+  background: rgba(99, 102, 241, 0.08);
+
+}
+
+
+
+.suggestion-card__arrow {
+
+  flex: 0 0 auto;
+
+  margin-left: auto;
+
+  color: var(--color-text-muted);
+
+}
+
+
+
+@keyframes welcome-in {
+
+  from {
+
+    opacity: 0;
+
+    transform: translateY(8px);
+
+  }
+
+
+
+  to {
+
+    opacity: 1;
+
+    transform: translateY(0);
+
+  }
+
+}
+
+
+
+@media (max-width: 600px) {
+
+  .welcome {
+
+    padding: 26px 8px 20px;
+
+  }
+
+
+
+  .welcome__illustration {
+
+    width: 82px;
+
+    height: 82px;
+
+    margin-bottom: 23px;
+
+  }
+
+
+
+  .welcome__desktop-break {
+
+    display: none;
+
+  }
+
+
+
+  .welcome h1 {
+
+    margin-top: 15px;
+
+    font-size: clamp(35px, 10vw, 46px);
+
+  }
+
+
+
+  .welcome__description {
+
+    max-width: 330px;
+
+    font-size: 14px;
+
+  }
+
+
+
+  .suggestion-list {
+
+    max-width: 390px;
+
+    grid-template-columns: 1fr;
+
+    gap: 9px;
+
+    margin-top: 27px;
+
+  }
+
+
+
+  .suggestion-card {
+
+    min-height: 58px;
+
+    padding: 10px 12px;
+
+    font-size: 13px;
+
+  }
+
+}
+
+
+
+@media (max-height: 760px) and (min-width: 601px) {
+
+  .welcome {
+
+    padding-top: 20px;
+
+    padding-bottom: 16px;
+
+  }
+
+
+
+  .welcome__illustration {
+
+    width: 76px;
+
+    height: 76px;
+
+    margin-bottom: 16px;
+
+  }
+
+
+
+  .welcome h1 {
+
+    margin-top: 12px;
+
+    margin-bottom: 8px;
+
+    font-size: clamp(36px, 3.8vw, 44px);
+
+  }
+
+
+
+  .welcome__description {
+
+    font-size: 13px;
+
+  }
+
+
+
+  .suggestion-list {
+
+    gap: 9px;
+
+    margin-top: 20px;
+
+  }
+
+
+
+  .suggestion-card {
+
+    min-height: 68px;
+
+    padding: 10px;
+
+    font-size: 11px;
+
+  }
+
+
+
+  .suggestion-card__icon {
+
+    width: 32px;
+
+    height: 32px;
+
+  }
+
+}
+
+
+
+@media (max-height: 540px) and (min-width: 601px) {
+
+  .welcome {
+
+    padding-top: 6px;
+
+    padding-bottom: 6px;
+
+  }
+
+
+
+  .welcome__illustration {
+
+    display: none;
+
+  }
+
+
+
+  .welcome h1 {
+
+    margin: 8px 0 6px;
+
+    font-size: 34px;
+
+  }
+
+
+
+  .welcome__description {
+
+    font-size: 12px;
+
+    line-height: 1.5;
+
+  }
+
+
+
+  .suggestion-list {
+
+    margin-top: 12px;
+
+  }
+
+
+
+  .suggestion-card {
+
+    min-height: 54px;
+
+    font-size: 10px;
+
+  }
+
+
+
+  .suggestion-card__icon {
+
+    width: 29px;
+
+    height: 29px;
+
+  }
+
+}
