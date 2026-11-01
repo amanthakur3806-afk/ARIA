@@ -263,3 +263,22 @@ def test_flowchart_intent_and_tool_execution(agent):
     assert "mermaid_markdown" in fc
     assert "steps_walkthrough" in fc
     assert len(fc["steps_walkthrough"]) > 0
+
+
+def test_no_double_question_generation(agent):
+    """
+    Verifies that when generating quiz questions, questions are passed to structured_data
+    and the markdown content does not duplicate every question in raw text.
+    """
+    resp = agent.handle_message(
+        "make 3 practice questions on virtual memory",
+        context_chunks=[SAMPLE_OS_DOCUMENT],
+    )
+    assert resp.intent == StudyIntent.GENERATE_QUIZ.value
+    assert resp.structured_data is not None
+    assert "questions" in resp.structured_data
+    assert len(resp.structured_data["questions"]) == 3
+    # Verify that raw questions are not duplicated in content text
+    assert "### Q1:" not in resp.content
+    assert "### Q2:" not in resp.content
+    assert "practice quiz" in resp.content.lower()

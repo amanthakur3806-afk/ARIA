@@ -655,7 +655,14 @@ function MessageItem({ message }) {
 
         <div className="message__bubble message__bubble--assistant">
 
-          <MarkdownRenderer text={message.content} isStreaming={message.isStreaming} />
+          <MarkdownRenderer
+            text={
+              message.structured_data?.questions?.length > 0
+                ? stripQuestionsIfWidgetPresent(message.content)
+                : message.content
+            }
+            isStreaming={message.isStreaming}
+          />
 
 
 
@@ -714,6 +721,16 @@ function MessageItem({ message }) {
 }
 
 
+
+// Helper to strip questions from markdown text when interactive QuizWidget is present to avoid double rendering
+function stripQuestionsIfWidgetPresent(content) {
+  if (!content) return ''
+  const qIndex = content.search(/\n*###\s*Q1[:.]/i)
+  if (qIndex !== -1) {
+    return content.slice(0, qIndex).trim()
+  }
+  return content
+}
 
 // Helper to detect if markdown content already contains full multi-phase study plan
 

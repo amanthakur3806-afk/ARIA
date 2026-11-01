@@ -1343,9 +1343,12 @@ class CommunicationAgent:
         return (clean[:35] + "..." if len(clean) > 35 else clean).title() or "New Study Chat"
 
     def _extract_count(self, message: str, default: int = 5) -> int:
-        match = re.search(r'\b(\d{1,2})\s*(?:questions?|cards?|mcqs?)\b', message, re.IGNORECASE)
+        match = re.search(r'\b(\d{1,2})\s*(?:[a-zA-Z\-]+\s+)*(?:questions?|cards?|mcqs?|flashcards?)\b', message, re.IGNORECASE)
         if match:
             return min(max(1, int(match.group(1))), 10)
+        match_post = re.search(r'\b(?:questions?|cards?|mcqs?|flashcards?)\s*(\d{1,2})\b', message, re.IGNORECASE)
+        if match_post:
+            return min(max(1, int(match_post.group(1))), 10)
         return default
 
     def handle_message(
@@ -1652,14 +1655,15 @@ class CommunicationAgent:
             questions = quiz_res.get("questions", [])
             valid_logic, issues = self.logic.validate_quiz_logic(questions)
 
-            content_lines = [
-                f"Here is your **{len(questions)}-question practice quiz** formatted for frontend and self-study:\n"
-            ]
-            for q in questions:
-                content_lines.append(f"### Q{q.get('id', 1)}: {q.get('question', '')}")
-                for opt_idx, opt in enumerate(q.get("options", [])):
-                    content_lines.append(f"- **{chr(65+opt_idx)})** {opt}")
-                content_lines.append(f"\n*Explanation:* {q.get('explanation', '')}\n")
+            if questions:
+                content_lines = [
+                    f"Here is your **{len(questions)}-question practice quiz** formatted for frontend and self-study:\n",
+                    f"> 📝 *A personalized interactive practice quiz with **{len(questions)} question(s)** has been prepared in the card below.*"
+                ]
+            else:
+                content_lines = [
+                    "No practice questions could be generated from the available study materials. Please verify that sufficient notes or text are provided."
+                ]
 
             total_turn_ms = (time.perf_counter() - t_start) * 1000.0
             profile = LatencyProfile(
@@ -2139,14 +2143,14 @@ class CommunicationAgent:
             questions = quiz_res.get("questions", [])
             valid_logic, issues = self.logic.validate_quiz_logic(questions)
 
-            intro = f"Here is your **{len(questions)}-question practice quiz** formatted for frontend and self-study:\n\n"
+            if questions:
+                intro = (
+                    f"Here is your **{len(questions)}-question practice quiz** formatted for frontend and self-study:\n\n"
+                    f"> 📝 *A personalized interactive practice quiz with **{len(questions)} question(s)** has been prepared in the card below.*"
+                )
+            else:
+                intro = "No practice questions could be generated from the available study materials. Please verify that sufficient notes or text are provided."
             yield {"type": "token", "content": intro}
-            for q in questions:
-                q_text = f"### Q{q.get('id', 1)}: {q.get('question', '')}\n"
-                for opt_idx, opt in enumerate(q.get("options", [])):
-                    q_text += f"- **{chr(65+opt_idx)})** {opt}\n"
-                q_text += f"\n*Explanation:* {q.get('explanation', '')}\n\n"
-                yield {"type": "token", "content": q_text}
 
             yield {
                 "type": "structured_data",
