@@ -18,7 +18,3 @@ class User(Base):
     )
 
     chat_messages = relationship("ChatMessage", back_populates="user", cascade="all, delete-orphan")
-    study_plans = relationship("StudyPlan", back_populates="user", cascade="all, delete-orphan")
-    flashcards = relationship("Flashcard", back_populates="user", cascade="all, delete-orphan")
-    quiz_questions = relationship("QuizQuestion", back_populates="user", cascade="all, delete-orphan")
-    flowcharts = relationship("StudyFlowchart", back_populates="user", cascade="all, delete-orphan")
