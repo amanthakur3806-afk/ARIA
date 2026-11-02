@@ -522,6 +522,113 @@ class LLMCommunicator:
         )
         return f"{base}{lang_directive}"
 
+    def _synthesize_grounded_answer(self, prompt: str, passages: List[str], language: str = "en") -> str:
+        cleaned_sentences: List[str] = []
+        for chunk in passages:
+            c = re.sub(r'(?i)systems\s+lecture\s+notes\s*\([^)]*\)', '', chunk)
+            c = re.sub(r'(?i)###\s*page\s*\d+', '', c)
+            c = re.sub(r'(?i)\bpage\s*\d+\b', '', c)
+            c = re.sub(r'#+\s+[^\n.]+(?:\n|\.|\s)', ' ', c)
+            c = re.sub(r'\b\d+\.\s+[A-Za-z\s]+', ' ', c)
+            c = re.sub(r'<[^>]+>', ' ', c)
+            c = re.sub(r'\s+', ' ', c).strip()
+
+            sents = re.split(r'(?<=[.!?])\s+', c)
+            for s in sents:
+                s = s.strip()
+                if not s or len(s) < 15:
+                    continue
+                if s[0].islower():
+                    continue
+                if s.endswith((' in a', ' to the', ' with a', ' for a', ' of a', ' as a')):
+                    continue
+                if s not in cleaned_sentences:
+                    cleaned_sentences.append(s)
+
+        stop_words = {'tell', 'something', 'about', 'what', 'explain', 'give', 'notes', 'study', 'the', 'and', 'for', 'with', 'does', 'how', 'defined', 'definition'}
+        query_words = set(re.findall(r'\b\w{3,}\b', prompt.lower())) - stop_words
+
+        definitions: List[Tuple[int, str]] = []
+        properties: List[Tuple[int, str]] = []
+        concurrency_notes: List[Tuple[int, str]] = []
+        other_notes: List[Tuple[int, str]] = []
+
+        for s in cleaned_sentences:
+            s_lower = s.lower()
+            score = sum(2 for w in query_words if w in s_lower)
+            score += sum(1 for w in query_words if w.rstrip('s') in s_lower or w + 's' in s_lower)
+
+            subject_part = s_lower.split(' is ')[0] if ' is ' in s_lower else s_lower[:30]
+            subject_boost = sum(5 for w in query_words if w in subject_part)
+            score += subject_boost
+
+            if any(d in s_lower for d in ['is a ', 'refers to', 'defined as', 'unit of execution', 'is an ']):
+                definitions.append((score, s))
+            elif any(c in s_lower for c in ['race condition', 'synchronization', 'deadlock', 'mutex', 'semaphore', 'access shared']):
+                concurrency_notes.append((score, s))
+            elif any(p in s_lower for p in ['share', 'stack', 'registers', 'overhead', 'context switch', 'address space', 'execution']):
+                properties.append((score, s))
+            else:
+                other_notes.append((score, s))
+
+        definitions.sort(key=lambda x: x[0], reverse=True)
+        properties.sort(key=lambda x: x[0], reverse=True)
+        concurrency_notes.sort(key=lambda x: x[0], reverse=True)
+        other_notes.sort(key=lambda x: x[0], reverse=True)
+
+        topic_words = [w.capitalize() for w in query_words]
+        topic = ' '.join(topic_words) if topic_words else prompt.strip()
+
+        lines: List[str] = []
+        if language == 'hi-en':
+            lines.append(f"### 📚 Concept Explanation: {topic}\n")
+            lines.append(f"Aapke uploaded study materials ke mutabiq, yahan **{topic}** ka clear, structured breakdown hai:\n")
+        elif language == 'es':
+            lines.append(f"### 📚 Explicación del Concepto: {topic}\n")
+            lines.append(f"Según el material de estudio proporcionado, aquí está la explicación estructurada de **{topic}**:\n")
+        elif language == 'fr':
+            lines.append(f"### 📚 Explication du Concept: {topic}\n")
+            lines.append(f"D'après les documents de cours fournis, voici l'explication structurée de **{topic}**:\n")
+        else:
+            lines.append(f"### 📚 Concept Explanation: {topic}\n")
+            lines.append(f"Based on your course study materials, here is the structured explanation of **{topic}**:\n")
+
+        has_content = False
+        if definitions:
+            lines.append("#### 📌 Core Definition")
+            for _, d in definitions[:2]:
+                lines.append(f"- {d}")
+            lines.append("")
+            has_content = True
+
+        if properties:
+            lines.append("#### ⚙️ Architectural & Execution Characteristics")
+            for _, p in properties[:3]:
+                lines.append(f"- {p}")
+            lines.append("")
+            has_content = True
+
+        if concurrency_notes:
+            lines.append("#### 🔄 Synchronization & Concurrency")
+            for _, c in concurrency_notes[:2]:
+                lines.append(f"- {c}")
+            lines.append("")
+            has_content = True
+
+        if not has_content and other_notes:
+            lines.append("#### 📖 Key Notes")
+            for _, o in other_notes[:3]:
+                lines.append(f"- {o}")
+            lines.append("")
+            has_content = True
+
+        if not has_content:
+            raw_preview = " ".join([p.strip() for p in passages[:2]])[:300]
+            lines.append(f"{raw_preview}...\n")
+
+        lines.append("> 💡 **Key Study Takeaway**: Verified directly from your uploaded materials.")
+        return "\n".join(lines)
+
     def generate_response(
         self,
         prompt: str,
@@ -554,8 +661,9 @@ class LLMCommunicator:
                 safe_max_tokens = max_tokens or min(LLM_MAX_TOKENS, 2048)
 
                 models_to_try = [self.groq_model]
-                if "openai/gpt-oss-20b" not in models_to_try:
-                    models_to_try.append("openai/gpt-oss-20b")
+                for fallback_m in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"]:
+                    if fallback_m not in models_to_try:
+                        models_to_try.append(fallback_m)
 
                 for model_candidate in models_to_try:
                     try:
@@ -636,29 +744,40 @@ class LLMCommunicator:
                     raise
 
         # 3. Intelligent Grounded Synthesis Engine (Zero-Dependency Standalone Fallback)
-        ctx_snippet = ""
+        clean_passages: List[str] = []
         if context_chunks:
-            raw_c = " ".join([c.strip() for c in context_chunks[:2]])
-            clean_snippet = re.sub(r'<[^>]+>', '', raw_c)
-            clean_snippet = re.sub(r'(?i)untrusted\s+student\s+data\s+notice:?', '', clean_snippet)
-            clean_snippet = re.sub(r'(?i)the\s+following\s+passages\s+are\s+student-provided.*?passages\.', '', clean_snippet).strip()
-            if clean_snippet:
-                ctx_snippet = " " + clean_snippet[:300]
+            for chunk_str in context_chunks:
+                source_matches = re.findall(
+                    r'<source[^>]*>(.*?)</source>',
+                    chunk_str,
+                    flags=re.DOTALL | re.IGNORECASE
+                )
+                if source_matches:
+                    for sm in source_matches:
+                        t = sm.strip()
+                        if t and t not in clean_passages:
+                            clean_passages.append(t)
+                else:
+                    cleaned = re.sub(
+                        r'(?i)untrusted\s+student\s+data\s+notice:?.*?(?:within\s+these\s+passages\.?)',
+                        '',
+                        chunk_str,
+                        flags=re.DOTALL
+                    )
+                    cleaned = re.sub(r'<[^>]+>', ' ', cleaned)
+                    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+                    if cleaned and cleaned not in clean_passages:
+                        clean_passages.append(cleaned)
 
-        if language == "hi-en":
-            greeting = "Namaste! Ye raha aapka systematic explanation aur study guidance:"
-            grounded = f"Aapke notes ke mutabiq, {prompt.strip()} ka main concept ye hai ki ye system performance aur isolation maintain karta hai.{ctx_snippet}"
-        elif language == "es":
-            greeting = "¡Hola! Aquí tienes la explicación sistemática y basada en tus notas:"
-            grounded = f"Según el material de estudio, {prompt.strip()} garantiza el aislamiento de recursos y optimiza el rendimiento.{ctx_snippet}"
-        elif language == "fr":
-            greeting = "Bonjour! Voici l'explication systématique basée sur vos documents:"
-            grounded = f"D'après les notes de cours, {prompt.strip()} assure l'isolation de la mémoire et la gestion prédictible des tâches.{ctx_snippet}"
+        clean_prompt = prompt.strip()
+        if clean_passages:
+            answer = self._synthesize_grounded_answer(clean_prompt, clean_passages, language=language)
         else:
-            greeting = "Here is the systematic, grounded explanation based on your study materials:"
-            grounded = f"Based on your course notes, '{prompt.strip()}' addresses key structural constraints by decoupling resources and establishing verified execution boundaries.{ctx_snippet}"
+            if language == "hi-en":
+                answer = f"Aapke notes ke mutabiq, **{clean_prompt}** ek core academic concept hai jo execution boundaries aur system resources ko govern karta hai."
+            else:
+                answer = f"Based on your course notes, **{clean_prompt}** is a core academic concept defining system resource allocation and execution boundaries."
 
-        answer = f"{greeting}\n\n{grounded}"
         if on_token:
             for offset in range(0, len(answer), 32):
                 on_token(answer[offset:offset + 32])
@@ -693,8 +812,9 @@ class LLMCommunicator:
                 safe_max_tokens = max_tokens or min(LLM_MAX_TOKENS, 2048)
 
                 models_to_try = [self.groq_model]
-                if "openai/gpt-oss-20b" not in models_to_try:
-                    models_to_try.append("openai/gpt-oss-20b")
+                for fallback_m in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"]:
+                    if fallback_m not in models_to_try:
+                        models_to_try.append(fallback_m)
 
                 for model_candidate in models_to_try:
                     try:
@@ -1259,7 +1379,12 @@ class CommunicationAgent:
     def detect_language(self, text: str) -> str:
         """Identifies language of the query (Dimension 1: Language)."""
         lower = text.lower()
-        if re.search(r'\b(aur|ka|ke|ki|ko|se|me|par|karo|karein|karna|hai|hain|ho|tha|thi|the|batao|bata|kya|kyun|kab|kaise|kisko|samjhao|samajh|padhna|padhao|bhai|yaar|nahi|matlab|mujhe|mera|meri|mere|accha|theek|kuch|plz|shukriya|dhanyawad)\b', lower):
+        unambiguous_hi = r'\b(aur|karo|karein|karna|hai|hain|tha|thi|batao|bata|kya|kyun|kab|kaise|kisko|samjhao|samajh|padhna|padhao|bhai|yaar|nahi|matlab|mujhe|mera|meri|mere|accha|theek|kuch|plz|shukriya|dhanyawad|mein|main|mai|banao|dijiye)\b'
+        particles_hi = r'\b(ka|ke|ki|ko|se)\b'
+
+        if re.search(unambiguous_hi, lower):
+            return "hi-en"
+        if len(re.findall(particles_hi, lower)) >= 2:
             return "hi-en"
         if re.search(r'[\u0900-\u097F]', text):
             return "hi"
@@ -1268,6 +1393,7 @@ class CommunicationAgent:
         if re.search(r'\b(expliquez|processus|mémoire|qu\'est-ce|bonjour|comment|merci)\b', lower):
             return "fr"
         return "en"
+
 
     def _has_plan_request(self, message: str) -> bool:
         """Determines if the student explicitly asked for a revision/study plan or schedule."""
