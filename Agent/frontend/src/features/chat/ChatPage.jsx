@@ -119,18 +119,13 @@ async function readChatStream(response, onToken, onComplete, onStructuredData) {
 
 
 export function ChatPage({
-
   isRagModalOpen: propIsOpen,
-
   setIsRagModalOpen: propSetIsOpen,
-
   activeSessionId,
-
   onRefreshThreads,
-
   userId: propUserId,
-  initialRagTab = 'library',
-
+  initialRagTab = "library",
+  onSelectSession,
 }) {
 
   const [messages, setMessages] = useState([])
@@ -555,36 +550,23 @@ export function ChatPage({
 
         fileToIngest={fileToIngest}
 
-        onUserChange={(newUid) => {
-
-          setUserId(newUid)
-
-
+                onUserChange={(newUid) => {
           loadChatHistory(newUid, sessionId)
-
         }}
-
         onSessionChange={(newSid) => {
-
-          setSessionId(newSid)
-
-
-          loadChatHistory(userId, newSid)
-
-        }}
-
-        onDocumentIngested={(data) => {
-
-          if (data?.session_id) {
-
-            setSessionId(data.session_id)
-
-
-          } else {
-
-
+          if (onSelectSession) {
+            onSelectSession(newSid)
           }
-
+          loadChatHistory(userId, newSid)
+        }}
+        onDocumentIngested={(data) => {
+          if (data?.session_id && onSelectSession) {
+            onSelectSession(data.session_id)
+          }
+          if (onRefreshThreads) {
+            onRefreshThreads()
+          }
+          loadChatHistory(userId, data?.session_id || sessionId)
         }}
 
       />

@@ -10,7 +10,7 @@ Features:
 2. PostgreSQL Cloud Persistence: Automatically persists documents and chunks to
    'aria.documents' and 'aria.chunks' in Neon/PostgreSQL when DATABASE_URL is set.
 3. Resilient Fallback: If PostgreSQL is unreachable or DATABASE_URL is missing,
-   transparently persists to local SQLite ('aria_rag.db').
+   transparently persists to local SQLite ('aria_store.db').
 4. Sub-millisecond in-memory indexing: Re-indexes chunks into BasicRetriever on startup and ingestion.
 5. Cross-session & curriculum fallback: Intelligently surfaces user or curriculum chunks if a session is fresh.
 """
@@ -48,9 +48,9 @@ from app.agent.communication_agent import (
     SAMPLE_OS_DOCUMENT,
 )
 
-# Database path defaults to Agent/backend/aria_rag.db
+# Database path defaults to Agent/backend/aria_store.db
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
-DB_PATH = Path(os.getenv("RAG_DB_PATH", str(BACKEND_DIR / "aria_rag.db")))
+DB_PATH = Path(os.getenv("RAG_DB_PATH", str(BACKEND_DIR / "aria_store.db")))
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 

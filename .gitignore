@@ -31,5 +31,9 @@ backend/.mypy_cache/
 **/__pycache__/
 **/.pytest_cache/
 **/.mypy_cache/
-*.db-shm
 *.db-wal
+*.db-shm
+aria_rag.db*
+aria_store.db*
+**/aria_rag.db*
+**/aria_store.db*
